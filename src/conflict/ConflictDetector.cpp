@@ -126,9 +126,19 @@ std::vector<NodeEvent> extractNodeEvents(
             (node->type() == infrastructure::NodeType::Junction ||
              node->type() == infrastructure::NodeType::Platform))
         {
+            double crossingTime = current.timestamp;
+            if (previous.velocity > 1e-6)
+            {
+                const double remainingDist = std::max(0.0, previousTrack->length() - previous.position);
+                const double estimated = previous.timestamp + remainingDist / previous.velocity;
+                if (estimated >= previous.timestamp && estimated <= current.timestamp)
+                {
+                    crossingTime = estimated;
+                }
+            }
             events.push_back({
                 previousTrack->destination(),
-                current.timestamp,
+                crossingTime,
                 current.uncertainty
             });
         }

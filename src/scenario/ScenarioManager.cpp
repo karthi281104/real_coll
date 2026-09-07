@@ -173,14 +173,14 @@ ScenarioResult ScenarioManager::loadHeadOnConflict()
     auto* express = trainManager_.getTrain(1);
     auto* freight = trainManager_.getTrain(3);
 
-    // Express at 200 m, moving forward at +25 m/s on T101
-    express->setPosition(200.0);
-    express->setVelocity(25.0);
+    // Express far behind on T101, moving at high speed
+    express->setPosition(100.0);
+    express->setVelocity(35.0);
     express->setAcceleration(0.0);
 
-    // Freight at 1800 m, moving reverse at -15 m/s on T101 (converging head-on)
-    freight->setPosition(1800.0);
-    freight->setVelocity(-15.0);
+    // Freight ahead on T101, moving slowly — critical closing conflict
+    freight->setPosition(700.0);
+    freight->setVelocity(5.0);
     freight->setAcceleration(0.0);
 
     const auto expressRoute = navigation::RouteNavigator::findRoute(network_, 1, 4);
@@ -192,9 +192,9 @@ ScenarioResult ScenarioManager::loadHeadOnConflict()
         { 3, 101, freightRoute }
     };
     result.description =
-        "HEAD-ON CONFLICT: Express #1 (+25 m/s) and Freight #3 (-15 m/s) converging\n"
-        "from opposite directions on Track 101. Critical risk requires immediate\n"
-        "emergency braking to avert catastrophic collision.";
+        "CRITICAL CLOSING CONFLICT: Express #1 (35 m/s) closing rapidly on Freight #3\n"
+        "(5 m/s) on Track 101 — relative closing speed 30 m/s. Stopping distance exceeded;\n"
+        "immediate emergency braking commanded.";
     return result;
 }
 

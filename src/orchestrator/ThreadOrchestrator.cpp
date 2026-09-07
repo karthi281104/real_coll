@@ -582,6 +582,7 @@ void ThreadOrchestrator::physicsLoop()
                 train->setVelocity(std::min(
                     train->velocity(), safetySpeedLimits_[command.trainId]));
                 train->setAcceleration(std::min(train->acceleration(), 0.0));
+                train->setState(TrainState::Braking);
                 break;
             case safety::SafetyCommandType::HoldAtSignal:
             case safety::SafetyCommandType::EmergencyBrake:
@@ -753,7 +754,7 @@ void ThreadOrchestrator::communicationLoop()
         {
             std::unique_lock lock(worldMutex_);
             const auto sent = communicationChannel_.totalSent() - sentBefore;
-            const auto delivered = communicationChannel_.totalDelivered() - deliveredBefore;
+            [[maybe_unused]] const auto delivered = communicationChannel_.totalDelivered() - deliveredBefore;
             const auto dropped = communicationChannel_.totalDropped() - droppedBefore;
             const double dropRate = (sent > 0U) ? (static_cast<double>(dropped) / static_cast<double>(sent)) : 0.0;
             const bool degraded = (sent > 0U && (dropRate >= 0.25 || communicationChannel_.packetLossRate() >= 0.25));

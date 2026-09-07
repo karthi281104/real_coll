@@ -37,36 +37,30 @@ double KinematicsEngine::updatePosition(
         return position;
     }
 
-    // No motion if zero velocity and no acceleration.
-    if (velocity == 0.0 && acceleration == 0.0)
+    if (velocity < 0.0)
+    {
+        velocity = 0.0;
+    }
+
+    // No motion if zero velocity and no positive acceleration.
+    if (velocity == 0.0 && acceleration <= 0.0)
     {
         return position;
     }
 
-    if (velocity > 0.0)
+    // If the train is decelerating, check whether it stops
+    // during this timestep.
+    if (acceleration < 0.0)
     {
-        if (acceleration < 0.0)
+        const double stoppingTime = -velocity / acceleration;
+
+        if (stoppingTime <= dt)
         {
-            const double stoppingTime = -velocity / acceleration;
-            if (stoppingTime <= dt)
-            {
-                return position
-                    + velocity * stoppingTime
-                    + 0.5 * acceleration * stoppingTime * stoppingTime;
-            }
-        }
-    }
-    else if (velocity < 0.0)
-    {
-        if (acceleration > 0.0)
-        {
-            const double stoppingTime = -velocity / acceleration;
-            if (stoppingTime <= dt)
-            {
-                return position
-                    + velocity * stoppingTime
-                    + 0.5 * acceleration * stoppingTime * stoppingTime;
-            }
+            // Train reaches zero velocity before the timestep ends.
+            // Move only until it stops.
+            return position
+                + velocity * stoppingTime
+                + 0.5 * acceleration * stoppingTime * stoppingTime;
         }
     }
 
@@ -98,11 +92,7 @@ SpeedMetersPerSecond KinematicsEngine::updateVelocity(
     }
 
     const double updated = velocity + acceleration * dt;
-    if (velocity >= 0.0)
-    {
-        return std::clamp(updated, 0.0, maximumSpeed);
-    }
-    return std::clamp(updated, -maximumSpeed, 0.0);
+    return std::clamp(updated, 0.0, maximumSpeed);
 }
 
 AccelerationMetersPerSecondSquared KinematicsEngine::effectiveDeceleration(

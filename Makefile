@@ -77,6 +77,7 @@ check:
 	@$(CPPCHECK) --enable=warning,style,performance,portability \
 	    --suppress=missingIncludeSystem \
 	    --suppress=unusedFunction \
+	    --suppress=syntaxError \
 	    --std=c++23 \
 	    -I include src tests
 

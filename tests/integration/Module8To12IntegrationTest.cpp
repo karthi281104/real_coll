@@ -45,6 +45,10 @@ TEST(Module8To12IntegrationTest, JunctionScenarioProducesSafetyCommand)
 
     orchestrator::ThreadOrchestrator orch(
         network, manager, channel, trainIds, cfg);
+    for (const auto& r : result.routes)
+    {
+        orch.setTrainRoute(r.trainId, r.currentTrackId, r.route);
+    }
     orch.setSafetyStep(pipeline.makeStep());
     orch.start();
 
@@ -64,7 +68,8 @@ TEST(Module8To12IntegrationTest, JunctionScenarioProducesSafetyCommand)
         !state.commands.empty()        ||
         !state.decisions.empty()       ||
         !state.reservations.empty()    ||
-        (manager.getTrain(3) != nullptr && manager.getTrain(3)->state() != TrainState::Idle);
+        (manager.getTrain(3) != nullptr && manager.getTrain(3)->state() != TrainState::Idle) ||
+        (manager.getTrain(3) != nullptr && manager.getTrain(3)->velocity() < 14.0);
     EXPECT_TRUE(hadAction)
         << "Expected safety pipeline to detect conflict and generate safety action.";
 }

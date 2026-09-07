@@ -118,14 +118,14 @@ void Train::setPosition(double position)
 
 void Train::setVelocity(double velocity)
 {
-    if (!std::isfinite(velocity))
+    if (!std::isfinite(velocity) || velocity < 0.0)
     {
         throw std::invalid_argument(
-            "Train velocity must be finite"
+            "Train velocity must be finite and non-negative"
         );
     }
 
-    if (std::abs(velocity) > maximumSpeed_)
+    if (velocity > maximumSpeed_)
     {
         throw std::invalid_argument(
             "Train velocity cannot exceed maximum speed"

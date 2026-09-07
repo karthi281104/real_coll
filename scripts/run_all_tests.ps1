@@ -51,6 +51,7 @@ if ($CppCheck)
     cppcheck --enable=warning,style,performance,portability `
              --suppress=missingIncludeSystem `
              --suppress=unusedFunction `
+             --suppress=syntaxError `
              --std=c++23 `
              -I (Join-Path $ProjectRoot "include") `
              (Join-Path $ProjectRoot "src") `

@@ -755,60 +755,56 @@ void TcasApplication::addTrainInteractive()
         std::cout << "[WARN] No route found between Node " << srcNode << " and Node " << dstNode << ".\n";
     }
 
-    if (trainManager_.addTrain(std::move(train)))
-    {
-        std::cout << "[OK] Train #" << id << " added to fleet registry.\n";
-        if (route.success && !route.tracks.empty())
-        {
-            orchestrator::SafetyPipeline::TrainRoute tr{
-                id,
-                route.tracks.front(),
-                route
-            };
-            currentRoutes_.push_back(tr);
-            if (pipeline_)
-            {
-                pipeline_->addOrUpdateRoute(tr);
-            }
-            if (orchestrator_)
-            {
-                orchestrator_->setTrainRoute(id, route.tracks.front(), route);
-            }
-            std::cout << "[OK] Route assigned (" << route.totalDistance << " m).\n";
-        }
+    orchestrator::UserTrainSpec spec;
+    spec.id = id;
+    spec.type = (typeChoice == 1) ? TrainType::Express : ((typeChoice == 2) ? TrainType::Passenger : TrainType::Freight);
+    spec.initialPosition = pos;
+    spec.initialVelocity = vel;
+    spec.startTrackId = route.tracks.empty() ? 0 : route.tracks.front();
+    spec.route = route;
 
-        if (orchestrator_)
+    if (route.success && !route.tracks.empty())
+    {
+        orchestrator::SafetyPipeline::TrainRoute tr{
+            id,
+            route.tracks.front(),
+            route
+        };
+        currentRoutes_.push_back(tr);
+        if (pipeline_)
         {
-            orchestrator_->postCommand({orchestrator::UserCommandType::AddTrain, id});
+            pipeline_->addOrUpdateRoute(tr);
         }
-        std::cout << "[OK] Train #" << id << " registered in simulation.\n";
+    }
+
+    if (orchestrator_)
+    {
+        orchestrator_->postCommand({orchestrator::UserCommandType::AddTrain, id, 0.0, "", spec});
     }
     else
     {
-        std::cout << "[ERR] Train #" << id << " already exists.\n";
+        trainManager_.addTrain(std::move(train));
     }
+    std::cout << "[OK] Train #" << id << " submitted to simulation registry.\n";
 }
 
 void TcasApplication::removeTrainInteractive()
 {
     const auto id = readTrainId("Train ID to remove: ");
-    if (trainManager_.removeTrain(id))
+    if (orchestrator_)
     {
-        if (orchestrator_)
-        {
-            orchestrator_->postCommand({orchestrator::UserCommandType::RemoveTrain, id});
-        }
-        if (pipeline_)
-        {
-            pipeline_->removeRoute(id);
-        }
-        std::erase_if(currentRoutes_, [id](const auto& r) { return r.trainId == id; });
-        std::cout << "[OK] Train #" << id << " removed from simulation and safety pipeline.\n";
+        orchestrator_->postCommand({orchestrator::UserCommandType::RemoveTrain, id});
     }
     else
     {
-        std::cout << "[ERR] Train #" << id << " not found.\n";
+        trainManager_.removeTrain(id);
     }
+    if (pipeline_)
+    {
+        pipeline_->removeRoute(id);
+    }
+    std::erase_if(currentRoutes_, [id](const auto& r) { return r.trainId == id; });
+    std::cout << "[OK] Train #" << id << " removal command dispatched.\n";
 }
 
 void TcasApplication::changeSpeedInteractive()
@@ -982,17 +978,38 @@ void TcasApplication::setCommQualityInteractive()
               << "  [4] Recover\n"
               << "Choice: ";
     const int c = readInt();
-    if (c == 3)
+    if (!orchestrator_)
     {
-        injectCommFaultInteractive();
+        std::cout << "[WARN] Simulation not active.\n";
+        return;
     }
-    else if (c == 4 || c == 1)
+    if (c == 1)
     {
-        recoverCommInteractive();
+        orchestrator_->postCommand({orchestrator::UserCommandType::SetCommLossRate, 0, 0.0});
+        orchestrator_->postCommand({orchestrator::UserCommandType::RecoverComm});
+        std::cout << "[OK] Normal communication restored (0% packet drop).\n";
+    }
+    else if (c == 2)
+    {
+        orchestrator_->postCommand({orchestrator::UserCommandType::SetCommLossRate, 0, 0.30});
+        orchestrator_->postCommand({orchestrator::UserCommandType::RecoverComm});
+        std::cout << "[OK] Degraded communication active (30% packet drop rate).\n";
+    }
+    else if (c == 3)
+    {
+        orchestrator_->postCommand({orchestrator::UserCommandType::SetCommLossRate, 0, 0.70});
+        orchestrator_->postCommand({orchestrator::UserCommandType::InjectCommFailure});
+        std::cout << "[OK] Communication failure injected (70% drop rate).\n";
+    }
+    else if (c == 4)
+    {
+        orchestrator_->postCommand({orchestrator::UserCommandType::SetCommLossRate, 0, 0.0});
+        orchestrator_->postCommand({orchestrator::UserCommandType::RecoverComm});
+        std::cout << "[OK] Communication recovered.\n";
     }
     else
     {
-        std::cout << "[OK] Setting applied.\n";
+        std::cout << "[ERR] Invalid choice.\n";
     }
 }
 
@@ -1023,7 +1040,7 @@ void TcasApplication::showPerformance()
         std::cout << "[INFO] Simulation not active.\n";
         return;
     }
-    const auto m = perfMetrics_.snapshot();
+    const auto m = orchestrator_->performanceMetricsSnapshot();
     std::cout << "\n[SAFETY PERFORMANCE METRICS]\n"
               << "  Collisions observed   : " << m.collisionCount << "\n"
               << "  Near-misses observed  : " << m.nearMissCount << "\n"

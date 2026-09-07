@@ -199,7 +199,7 @@ std::vector<Conflict> ConflictDetector::detect(
             const Conflict candidate{
                 trainA,
                 trainB,
-                classifySameTrack(a0, b0),
+                classifySameTrack(a0, a1, b0, b1),
                 a0.trackId,
                 0,
                 firstTime,
@@ -278,12 +278,24 @@ std::vector<Conflict> ConflictDetector::detect(
 }
 
 ConflictType ConflictDetector::classifySameTrack(
-    const prediction::FutureState& a,
-    const prediction::FutureState& b) const noexcept
+    const prediction::FutureState& a0,
+    const prediction::FutureState& a1,
+    const prediction::FutureState& b0,
+    const prediction::FutureState& b1) const noexcept
 {
-    return (a.velocity * b.velocity < 0.0)
-        ? ConflictType::HeadOn
-        : ConflictType::RearEnd;
+    // 1. Direct opposite velocity signs
+    if (a0.velocity * b0.velocity < 0.0 || a1.velocity * b1.velocity < 0.0)
+    {
+        return ConflictType::HeadOn;
+    }
+    // 2. Opposite displacement directions along the track coordinate
+    const double deltaA = a1.position - a0.position;
+    const double deltaB = b1.position - b0.position;
+    if (deltaA * deltaB < -1e-6)
+    {
+        return ConflictType::HeadOn;
+    }
+    return ConflictType::RearEnd;
 }
 
 bool ConflictDetector::hasTemporalConflict(

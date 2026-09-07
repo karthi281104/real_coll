@@ -1,6 +1,9 @@
 #include "orchestrator/ThreadOrchestrator.hpp"
 
 #include "physics/KinematicsEngine.hpp"
+#include "train/ExpressTrain.hpp"
+#include "train/PassengerTrain.hpp"
+#include "train/FreightTrain.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -270,6 +273,7 @@ void ThreadOrchestrator::updateWorldSnapshotLocked()
         }
 
         const bool hasSensorFault = failedSensors_.contains(trainId);
+        const double uncert = hasSensorFault ? 15.0 : 1.0;
 
         worldState_.trains.push_back({
             train->id(),
@@ -283,7 +287,8 @@ void ThreadOrchestrator::updateWorldSnapshotLocked()
             train->position(),
             train->velocity(),
             train->acceleration(),
-            hasSensorFault
+            hasSensorFault,
+            uncert
         });
     }
 
@@ -419,14 +424,75 @@ void ThreadOrchestrator::processUserCommandsLocked()
             worldState_.communicationFailure = commChannelDegraded_.load();
             break;
 
+        case UserCommandType::SetCommLossRate:
+            communicationChannel_.setPacketLossRate(cmd.numericValue);
+            commChannelDegraded_.store(cmd.numericValue >= 0.25);
+            worldState_.communicationFailure = userCommFault_.load() || (cmd.numericValue >= 0.60);
+            break;
+
         case UserCommandType::AddTrain:
-            if (std::find(trainIds_.begin(), trainIds_.end(), cmd.trainId) == trainIds_.end())
+            if (cmd.payload.has_value())
             {
-                trainIds_.push_back(cmd.trainId);
+                try
+                {
+                    const auto spec = std::any_cast<UserTrainSpec>(cmd.payload);
+                    std::unique_ptr<train::Train> train;
+                    switch (spec.type)
+                    {
+                    case TrainType::Express:
+                        train = std::make_unique<train::ExpressTrain>(spec.id, 45000.0, 45.0, 0.9, 1.4);
+                        break;
+                    case TrainType::Passenger:
+                        train = std::make_unique<train::PassengerTrain>(spec.id, 60000.0, 33.3, 0.8, 1.2);
+                        break;
+                    case TrainType::Freight:
+                    default:
+                        train = std::make_unique<train::FreightTrain>(spec.id, 120000.0, 22.2, 0.5, 0.8);
+                        break;
+                    }
+                    train->setPosition(spec.initialPosition);
+                    train->setVelocity(spec.initialVelocity);
+
+                    const TrainId tid = spec.id;
+                    if (trainManager_.addTrain(std::move(train)))
+                    {
+                        if (std::find(trainIds_.begin(), trainIds_.end(), tid) == trainIds_.end())
+                        {
+                            trainIds_.push_back(tid);
+                        }
+                        if (!spec.route.tracks.empty())
+                        {
+                            TrainNavigationState nav;
+                            nav.trainId = tid;
+                            nav.currentTrackId = spec.startTrackId;
+                            nav.routeTrackIndex = 0;
+                            nav.route = spec.route;
+                            for (std::size_t i = 0; i < nav.route.tracks.size(); ++i)
+                            {
+                                if (nav.route.tracks[i] == spec.startTrackId)
+                                {
+                                    nav.routeTrackIndex = i;
+                                    break;
+                                }
+                            }
+                            navStates_[tid] = std::move(nav);
+                        }
+                        worldState_.operatorMessage = "[OK] Train #" + std::to_string(tid) + " ADDED.";
+                    }
+                }
+                catch (...) {}
+            }
+            else
+            {
+                if (std::find(trainIds_.begin(), trainIds_.end(), cmd.trainId) == trainIds_.end())
+                {
+                    trainIds_.push_back(cmd.trainId);
+                }
             }
             break;
 
         case UserCommandType::RemoveTrain:
+            trainManager_.removeTrain(cmd.trainId);
             std::erase(trainIds_, cmd.trainId);
             navStates_.erase(cmd.trainId);
             failedSensors_.erase(cmd.trainId);
@@ -455,7 +521,14 @@ void ThreadOrchestrator::processUserCommandsLocked()
                     }
                     navStates_[spec.trainId] = std::move(nav);
                 }
-                catch (...) {}
+                catch (const std::exception& e)
+                {
+                    worldState_.operatorMessage = "[ERR] Route change failed: " + std::string(e.what());
+                }
+                catch (...)
+                {
+                    worldState_.operatorMessage = "[ERR] Route change failed: Unknown error";
+                }
             }
             break;
 
@@ -625,6 +698,7 @@ void ThreadOrchestrator::safetyLoop()
                 const SafetyCycleResult result = step(state);
                 {
                     std::unique_lock lock(worldMutex_);
+                    worldState_.safetyError.clear();
                     worldState_.predictions = result.predictions;
                     worldState_.activeConflicts = result.activeConflicts;
                     worldState_.reservations = result.reservations;
@@ -636,10 +710,18 @@ void ThreadOrchestrator::safetyLoop()
                     commandQueue_.push(command);
                 }
             }
-            catch (const std::exception&)
+            catch (const std::exception& e)
             {
                 safetyFailure_.store(true);
                 std::unique_lock lock(worldMutex_);
+                worldState_.safetyError = e.what();
+                worldState_.systemStatus = SystemStatus::Degraded;
+            }
+            catch (...)
+            {
+                safetyFailure_.store(true);
+                std::unique_lock lock(worldMutex_);
+                worldState_.safetyError = "Unknown safety execution exception";
                 worldState_.systemStatus = SystemStatus::Degraded;
             }
         }
@@ -673,9 +755,10 @@ void ThreadOrchestrator::communicationLoop()
             const auto sent = communicationChannel_.totalSent() - sentBefore;
             const auto delivered = communicationChannel_.totalDelivered() - deliveredBefore;
             const auto dropped = communicationChannel_.totalDropped() - droppedBefore;
-            const bool degraded = (sent > 0U && dropped > delivered);
+            const double dropRate = (sent > 0U) ? (static_cast<double>(dropped) / static_cast<double>(sent)) : 0.0;
+            const bool degraded = (sent > 0U && (dropRate >= 0.25 || communicationChannel_.packetLossRate() >= 0.25));
             commChannelDegraded_.store(degraded);
-            worldState_.communicationFailure = userCommFault_.load() || degraded;
+            worldState_.communicationFailure = userCommFault_.load() || (dropRate >= 0.60 || communicationChannel_.packetLossRate() >= 0.60);
         }
         ++communicationCycles_;
         waitUntil(next);
@@ -703,6 +786,12 @@ void ThreadOrchestrator::hmiLoop()
         ++hmiCycles_;
         waitUntil(next);
     }
+}
+
+hmi::PerformanceSnapshot ThreadOrchestrator::performanceMetricsSnapshot() const
+{
+    std::shared_lock lock(worldMutex_);
+    return performanceMetrics_.snapshot();
 }
 
 } // namespace tcas::orchestrator

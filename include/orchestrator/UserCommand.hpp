@@ -29,6 +29,7 @@ enum class UserCommandType
     RecoverSensor,
     InjectCommFailure,
     RecoverComm,
+    SetCommLossRate,
 
     LoadScenario
 };

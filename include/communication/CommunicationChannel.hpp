@@ -71,6 +71,12 @@ public:
     [[nodiscard]]
     double deliveryRate() const noexcept;
 
+    // Dynamically adjust packet loss rate [0.0, 1.0]
+    void setPacketLossRate(double rate) noexcept;
+
+    [[nodiscard]]
+    double packetLossRate() const noexcept;
+
     // Reset all queues and counters (full channel reset including entity registrations)
     void clear() noexcept;
 

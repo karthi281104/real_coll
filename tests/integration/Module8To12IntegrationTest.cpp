@@ -56,17 +56,17 @@ TEST(Module8To12IntegrationTest, JunctionScenarioProducesSafetyCommand)
     EXPECT_GE(orch.safetyCycles(), 3U)
         << "Expected at least 3 safety cycles to run.";
 
-    // The safety pipeline should have produced commands (trains may have already
-    // been braked to a stop by the time we read the snapshot, so we check cycle
-    // count as evidence the pipeline ran, and we allow for either state).
+    // The safety pipeline must produce a real safety action (conflict detected,
+    // reservation/decision generated, command emitted, or train speed/state modified).
     const auto state = orch.snapshot();
     const bool hadAction =
         !state.activeConflicts.empty() ||
         !state.commands.empty()        ||
         !state.decisions.empty()       ||
-        orch.safetyCycles() >= 3U;   // pipeline ran at least 3 cycles
+        !state.reservations.empty()    ||
+        (manager.getTrain(3) != nullptr && manager.getTrain(3)->state() != TrainState::Idle);
     EXPECT_TRUE(hadAction)
-        << "Expected safety pipeline to be active.";
+        << "Expected safety pipeline to detect conflict and generate safety action.";
 }
 
 TEST(Module8To12IntegrationTest, UnsafeStoppingProducesEmergencyBrake)

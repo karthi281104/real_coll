@@ -175,6 +175,16 @@ double CommunicationChannel::deliveryRate() const noexcept
     return static_cast<double>(totalDelivered_) / static_cast<double>(totalSent_);
 }
 
+void CommunicationChannel::setPacketLossRate(const double rate) noexcept
+{
+    config_.packetLossRate = std::clamp(rate, 0.0, 1.0);
+}
+
+double CommunicationChannel::packetLossRate() const noexcept
+{
+    return config_.packetLossRate;
+}
+
 void CommunicationChannel::clear() noexcept
 {
     inFlight_.clear();

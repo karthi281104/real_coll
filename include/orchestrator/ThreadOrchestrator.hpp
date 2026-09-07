@@ -102,6 +102,8 @@ public:
 
     void setOperatorMessage(std::string message);
 
+    [[nodiscard]] hmi::PerformanceSnapshot performanceMetricsSnapshot() const;
+
 private:
     void physicsLoop();
     void safetyLoop();

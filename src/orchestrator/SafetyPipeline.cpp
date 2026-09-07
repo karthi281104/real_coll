@@ -238,13 +238,17 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         std::vector<prediction::FutureState> trajectory;
         try
         {
+            const double uncertainty = (snap->sensorFailure || state.sensorFailure)
+                ? std::max(snap->positionUncertainty, 15.0)
+                : snap->positionUncertainty;
+
             trajectory =
                 prediction::PredictionEngine::predictStandardHorizon(
                     *proxy,
                     network_,
                     trainRoute.route,
                     effectiveTrackId,
-                    1.0 /* m uncertainty */);
+                    uncertainty);
         }
         catch (const std::exception& /*e*/)
         {

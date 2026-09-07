@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 # =============================================================
 # TCAS Full Build & Test Script
 # Runs all test suites for Modules 1-5 plus integration tests.
@@ -51,7 +51,7 @@ if ($CppCheck)
     cppcheck --enable=warning,style,performance,portability `
              --suppress=missingIncludeSystem `
              --suppress=unusedFunction `
-             --std=c++20 `
+             --std=c++23 `
              -I (Join-Path $ProjectRoot "include") `
              (Join-Path $ProjectRoot "src") `
              (Join-Path $ProjectRoot "tests")

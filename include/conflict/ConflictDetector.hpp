@@ -31,8 +31,10 @@ private:
 
     [[nodiscard]]
     ConflictType classifySameTrack(
-        const prediction::FutureState& a,
-        const prediction::FutureState& b
+        const prediction::FutureState& a0,
+        const prediction::FutureState& a1,
+        const prediction::FutureState& b0,
+        const prediction::FutureState& b1
     ) const noexcept;
 
     [[nodiscard]]

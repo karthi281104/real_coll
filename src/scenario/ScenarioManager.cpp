@@ -156,16 +156,11 @@ ScenarioResult ScenarioManager::loadRearEndConflict()
 // -----------------------------------------------------------------------
 // Head-On Conflict
 // -----------------------------------------------------------------------
-//  Two trains approaching Alpha Junction (Node 2) from opposite ends
-//  of the SAME track — one close to node 1, one close to node 2.
-//  The ConflictDetector classifies same-track approaching trains as HEAD-ON
-//  when they are converging (the one further along is slower and the one
-//  behind is faster, but here we rely on their positions on T101 being
-//  such that the detector sees them both on T101 at overlapping future states).
-//  Train 1: near node 1 side (position 100), moving forward fast.
-//  Train 3: near node 2 side (position 1900), also moving forward but slower.
-//  They will be detected as rear-end or same-track conflict; the HMI labels it
-//  head-on because one is catching the other from behind at high relative speed.
+//  Two trains approaching each other on the SAME track (T101) from opposite
+//  directions: Express #1 moving forward (+25 m/s) from position 200m,
+//  and Freight #3 moving in reverse (-15 m/s) from position 1800m.
+//  The ConflictDetector classifies opposite velocities / closing displacements
+//  as HEAD-ON, triggering critical emergency braking.
 ScenarioResult ScenarioManager::loadHeadOnConflict()
 {
     buildBaseNetwork();
@@ -178,14 +173,14 @@ ScenarioResult ScenarioManager::loadHeadOnConflict()
     auto* express = trainManager_.getTrain(1);
     auto* freight = trainManager_.getTrain(3);
 
-    // Express far behind, moving very fast (will catch freight quickly)
-    express->setPosition(100.0);      // near start of T101
-    express->setVelocity(35.0);       // near max speed
+    // Express at 200 m, moving forward at +25 m/s on T101
+    express->setPosition(200.0);
+    express->setVelocity(25.0);
     express->setAcceleration(0.0);
 
-    // Freight just ahead, moving slowly — closing gap is critical
-    freight->setPosition(700.0);      // same T101, ahead
-    freight->setVelocity(5.0);        // very slow — will be overtaken
+    // Freight at 1800 m, moving reverse at -15 m/s on T101 (converging head-on)
+    freight->setPosition(1800.0);
+    freight->setVelocity(-15.0);
     freight->setAcceleration(0.0);
 
     const auto expressRoute = navigation::RouteNavigator::findRoute(network_, 1, 4);
@@ -197,18 +192,17 @@ ScenarioResult ScenarioManager::loadHeadOnConflict()
         { 3, 101, freightRoute }
     };
     result.description =
-        "CLOSING-FAST CONFLICT: Express #1 (35 m/s) closing rapidly on Freight #3\n"
-        "(5 m/s) on Track 101 — closing rate 30 m/s. Emergency stop range exceeded.\n"
-        "Express should REDUCE SPEED or EMERGENCY BRAKE.\n"
-        "Demonstrates critical rear-end at high relative velocity.";
+        "HEAD-ON CONFLICT: Express #1 (+25 m/s) and Freight #3 (-15 m/s) converging\n"
+        "from opposite directions on Track 101. Critical risk requires immediate\n"
+        "emergency braking to avert catastrophic collision.";
     return result;
 }
 
 // -----------------------------------------------------------------------
 // Platform Conflict
 // -----------------------------------------------------------------------
-//  Two trains approaching Platform A (Node 8) from different tracks
-//  Train 1 via T101->T102->T108, Train 2 via T101->T104->T107
+//  Two trains approaching Platform A (Node 8) from different tracks:
+//  Train 1 via T102->T108, Train 2 via T104->T107
 ScenarioResult ScenarioManager::loadPlatformConflict()
 {
     buildBaseNetwork();
@@ -221,16 +215,25 @@ ScenarioResult ScenarioManager::loadPlatformConflict()
     auto* p1 = trainManager_.getTrain(1);
     auto* p2 = trainManager_.getTrain(2);
 
-    p1->setPosition(1400.0);   // on T102 (Alpha->Beta)
+    p1->setPosition(1400.0);   // on T102 (Alpha->Beta, length 1500m, leads to T108->Node 8)
     p1->setVelocity(15.0);
     p1->setAcceleration(0.0);
 
-    p2->setPosition(2500.0);   // on T104 (Alpha->South)
+    p2->setPosition(2500.0);   // on T104 (Alpha->South, length 3000m, leads to T107->Node 8)
     p2->setVelocity(15.0);
     p2->setAcceleration(0.0);
 
-    const auto route1 = navigation::RouteNavigator::findRoute(network_, 1, 8);
-    const auto route2 = navigation::RouteNavigator::findRoute(network_, 1, 8);
+    navigation::RouteResult route1;
+    route1.success = true;
+    route1.tracks = { 102, 108 };
+    route1.totalDistance = 2100.0;
+    route1.reason = navigation::RouteResult::FailReason::None;
+
+    navigation::RouteResult route2;
+    route2.success = true;
+    route2.tracks = { 104, 107 };
+    route2.totalDistance = 3500.0;
+    route2.reason = navigation::RouteResult::FailReason::None;
 
     ScenarioResult result;
     result.routes = {
@@ -239,8 +242,8 @@ ScenarioResult ScenarioManager::loadPlatformConflict()
     };
     result.description =
         "PLATFORM CONFLICT: Two Passenger trains approaching Platform A (Node 8)\n"
-        "from different directions. Train #1 has lower ID, takes priority.\n"
-        "Train #2 should be held at signal.";
+        "simultaneously via independent approach tracks (T102->T108 vs T104->T107).\n"
+        "Train #1 has lower ID and priority; Train #2 is held at signal.";
     return result;
 }
 

@@ -309,7 +309,7 @@ void ThreadOrchestrator::updateWorldSnapshotLocked()
     worldState_.timing.packetsDropped = communicationChannel_.totalDropped();
     if (worldState_.timing.packetsSent > 0)
     {
-        worldState_.timing.packetDropRatePct = (100.0 * worldState_.timing.packetsDropped) / worldState_.timing.packetsSent;
+        worldState_.timing.packetDropRatePct = (100.0 * static_cast<double>(worldState_.timing.packetsDropped)) / static_cast<double>(worldState_.timing.packetsSent);
     }
 }
 
@@ -468,7 +468,7 @@ void ThreadOrchestrator::processUserCommandsLocked()
 void ThreadOrchestrator::physicsLoop()
 {
     auto next = std::chrono::steady_clock::now();
-    const double dt = config_.physicsPeriod.count() / 1000.0;
+    const double dt = static_cast<double>(config_.physicsPeriod.count()) / 1000.0;
 
     while (running_.load())
     {

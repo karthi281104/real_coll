@@ -53,8 +53,11 @@ add_library(tcas_core
     src/application/TcasApplication.cpp
 )
 
+find_package(Threads REQUIRED)
+
 target_include_directories(tcas_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(tcas_core PUBLIC ${PROJECT_SOURCE_DIR}/include/scenario)
+target_link_libraries(tcas_core PUBLIC Threads::Threads)
 
 add_executable(tcas
     src/main.cpp
@@ -65,7 +68,7 @@ add_executable(tcas
     src/demo/Module10Demo.cpp
 )
 
-target_link_libraries(tcas PRIVATE tcas_core)
+target_link_libraries(tcas PRIVATE tcas_core Threads::Threads)
 target_include_directories(tcas PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(tcas PRIVATE ${PROJECT_SOURCE_DIR}/include/scenario)
 

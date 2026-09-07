@@ -57,6 +57,20 @@ struct UserCommand
     double numericValue{ 0.0 };
     std::string textValue;
     std::any payload;
+
+    UserCommand() = default;
+
+    UserCommand(UserCommandType t)
+        : type(t) {}
+
+    UserCommand(UserCommandType t, TrainId tid)
+        : type(t), trainId(tid) {}
+
+    UserCommand(UserCommandType t, TrainId tid, double num)
+        : type(t), trainId(tid), numericValue(num) {}
+
+    UserCommand(UserCommandType t, TrainId tid, double num, std::string text, std::any p = {})
+        : type(t), trainId(tid), numericValue(num), textValue(std::move(text)), payload(std::move(p)) {}
 };
 
 } // namespace tcas::orchestrator

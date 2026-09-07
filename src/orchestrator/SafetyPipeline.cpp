@@ -152,7 +152,7 @@ DistanceMeters distanceToNode(
     return 0.0;
 }
 
-const char* commandTypeName(safety::SafetyCommandType t) noexcept
+[[maybe_unused]] const char* commandTypeName(safety::SafetyCommandType t) noexcept
 {
     switch (t)
     {

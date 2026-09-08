@@ -610,3 +610,18 @@ Module 1 is considered complete when:
 Module 1 successfully establishes the railway infrastructure foundation required by the subsequent TCAS modules.
 
 The implementation has been compiled using C++23 and validated using GoogleTest/CTest with all current tests passing.
+
+---
+
+# 24. Layman's Terms Description (What Does This Module Do?)
+
+Imagine you are building a giant model train set or drawing a map for an entire national railway system. Before any train can run, you need the actual tracks, stations, junctions (where tracks split or merge), and station platforms laid down on the ground.
+
+**Module 1 is the "Digital Blueprint" of the railway network.**
+
+- **Nodes** are the dots on the map: towns, stations, junctions, or platforms.
+- **Tracks** are the one-way steel rails connecting those dots, with rules like length and maximum safe speed limits.
+- **The Railway Network** is the master map that keeps track of every single piece of steel and every station, ensuring no two tracks have the same ID and that tracks only connect to stations that actually exist.
+- **The Path Checkers (BFS & DFS)** are like safety inspectors walking the line before opening day. They check: "Can a train actually get from Station A to Station B?" (reachability) and "Are there any infinite circular loops that could trap a train or confuse navigation?" (cycle detection).
+
+Without this module, the trains would have nowhere to run, no speed limits to obey, and no physical map to follow.

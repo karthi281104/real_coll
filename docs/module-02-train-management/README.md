@@ -399,3 +399,19 @@ Overall:
 ```
 
 Therefore, Module 2 is considered successfully implemented and verified.
+
+---
+
+## 14. Layman's Terms Description (What Does This Module Do?)
+
+If Module 1 was the static map and railway tracks, **Module 2 is the train depot and fleet registry**.
+
+Imagine you are the chief railway dispatcher. You need to know:
+- What trains exist on your network right now? (Train ID 1, Train ID 2, etc.)
+- What kind of trains are they?
+  - An **Express Train** is sleek, carries passengers at high speed (up to 45 m/s or 162 km/h), and has high-performance brakes.
+  - A **Passenger Train** runs standard commuter services at normal speeds (up to 33 m/s or 120 km/h) with comfortable deceleration.
+  - A **Freight Train** is a massive, heavy cargo hauler (1,500,000 kg). It moves slower (max 22 m/s or 80 km/h) and takes a very long distance to slow down due to pure momentum.
+- What is their current health and status? (Are they Idle in the yard, Running along a route, Braking to avoid a hazard, or Stopped at a red signal?)
+
+**TrainManager** acts as the central registry office. It guarantees that no two trains have the same number, lets any part of the system look up a train instantly, and safely adds or retires trains from the network.

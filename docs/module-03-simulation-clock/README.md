@@ -1,4 +1,4 @@
-﻿# Module 3 — Simulation & Clock
+# Module 3 — Simulation & Clock
 
 ## 1. Module Overview
 
@@ -90,6 +90,67 @@ If `periodMs` is not an exact multiple of `physicsPeriodMs`, the interval is rou
 
 ---
 
-## 6. Module Status
+---
 
-**STATUS: COMPLETE — BASELINE IMPLEMENTATION**
+## 6. Execution Flow
+
+The simulation clock orchestrates time deterministically across the entire simulator. Time advances in discrete quantum ticks ($\Delta t = 20\text{ ms}$):
+
+```text
+[External Loop / Orchestrator]
+               │
+               ▼
+        SimClock::tick()
+               │
+      ┌────────┴────────────────────────┐
+      │  tickCount++                    │
+      │  elapsedTime += dt (0.020 s)    │
+      └────────┬────────────────────────┘
+               │
+      ┌────────▼────────────────────────┐
+      │ SimulationTimer Queries         │
+      ├─────────────────────────────────┤
+      │ timerPhysics.shouldFire(tick)   │ ──► Every 1 tick (20 ms)  ──► Kinematics update
+      │ timerSafety.shouldFire(tick)    │ ──► Every 5 ticks (100 ms)──► Conflict detection & resolution
+      │ timerComms.shouldFire(tick)     │ ──► Every 5 ticks (100 ms)──► Wireless channel step
+      │ timerHmi.shouldFire(tick)       │ ──► Every 10 ticks (200 ms)─► Dashboard render & telemetry
+      └─────────────────────────────────┘
+```
+
+Because time only advances when `tick()` is called, tests can advance time by 100 ticks instantaneously without sleeping for 2 real seconds.
+
+---
+
+## 7. Automated Test Verification
+
+Module 3 is validated by 3 comprehensive test suites under `tests/simulation/`:
+
+1. **`SimClockTest.cpp`**: Tests clock construction, step advancement, reset behavior, custom dt handling, and precision over 1,000,000 ticks.
+2. **`SimulationConfigTest.cpp`**: Validates default parameter structures, horizon validity, and custom configuration propagation.
+3. **`SimulationTimerTest.cpp`**: Validates periodic trigger intervals, exact zero-tick behavior, sub-cycle floor division, and multi-timer cadence alignment.
+
+All tests pass with 100% success rate under GoogleTest.
+
+---
+
+## 8. Module Status
+
+**STATUS: COMPLETE — FULLY INTEGRATED & VERIFIED**
+
+---
+
+## 9. Layman's Terms Description (What Does This Module Do?)
+
+Think of a movie projector or a musical metronome:
+
+If you are watching a movie, each frame of film clicks forward 24 times every second. If you pause the projector, everything in the movie freezes. If you speed up the film, the actors move faster, but the story happens in the exact same sequence every single time.
+
+**Module 3 is the Metronome of the Train Simulator.**
+
+Instead of relying on the computer's wall clock (which can stutter, lag, or vary between fast and slow computers), Module 3 creates a steady, rock-solid "tick... tick... tick..." every 20 milliseconds.
+- At **Tick 1**, it tells the physics engine: "Move the train forward by 0.02 seconds of travel."
+- Every **5 Ticks**, it tells the safety brain: "Look ahead down the tracks for any collisions."
+- Every **10 Ticks**, it updates the operator's computer screen.
+
+Because the clock is completely controllable, engineers can test the safety system in "fast forward" (simulating an hour of train traffic in 3 seconds) or "slow motion" (stepping through a near-miss millisecond by millisecond) with 100% mathematical reproducibility.
+

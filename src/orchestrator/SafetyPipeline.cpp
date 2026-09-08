@@ -217,6 +217,20 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             continue;
         }
 
+        // If the train has finished its route and docked at the terminal station,
+        // it has cleared the mainline corridor and should not block following trains.
+        if (snap->state == TrainState::Stopped && !trainRoute.route.tracks.empty())
+        {
+            if (snap->trackId == trainRoute.route.tracks.back() || trainRoute.currentTrackId == trainRoute.route.tracks.back())
+            {
+                const auto* finalTrack = network_.getTrack(trainRoute.route.tracks.back());
+                if (finalTrack != nullptr && snap->position >= finalTrack->length() - 5.0)
+                {
+                    continue;
+                }
+            }
+        }
+
         auto proxy = buildTrainProxy(*snap);
         if (proxy == nullptr)
         {

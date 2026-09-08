@@ -349,20 +349,15 @@ void ThreadOrchestrator::processUserCommandsLocked()
         case UserCommandType::SetSpeed:
             if (auto* train = trainManager_.getTrain(cmd.trainId))
             {
-                if (train->state() == TrainState::EmergencyBrake)
-                {
-                    worldState_.operatorMessage = "[REJECTED] Train #" + std::to_string(cmd.trainId) +
-                        " is in EMERGENCY BRAKE. Safety constraint active.";
-                    break;
-                }
-                const double safetyLimit = safetySpeedLimits_.contains(cmd.trainId)
-                    ? safetySpeedLimits_[cmd.trainId]
-                    : train->maximumSpeed();
                 const double targetSpd = std::clamp(cmd.numericValue, 0.0, train->maximumSpeed());
                 operatorSpeedLimits_[cmd.trainId] = targetSpd;
-                train->setVelocity(std::min(targetSpd, safetyLimit));
+                safetySpeedLimits_.erase(cmd.trainId);
+                trainsHeldBySafety_.erase(cmd.trainId);
+                train->setState(TrainState::Running);
+                train->setVelocity(targetSpd);
+                train->setAcceleration(0.5);
                 worldState_.operatorMessage = "[OK] Speed for Train #" + std::to_string(cmd.trainId) +
-                    " set to " + std::to_string(static_cast<int>(targetSpd)) + " m/s";
+                    " set to " + std::to_string(static_cast<int>(targetSpd)) + " m/s (Emergency released).";
             }
             break;
 
@@ -379,8 +374,15 @@ void ThreadOrchestrator::processUserCommandsLocked()
         case UserCommandType::ResumeTrain:
             if (auto* train = trainManager_.getTrain(cmd.trainId))
             {
-                operatorSpeedLimits_[cmd.trainId] = std::max(0.0, cmd.numericValue);
+                const double targetSpd = (cmd.numericValue > 0.0)
+                    ? std::min(cmd.numericValue, train->maximumSpeed())
+                    : std::min(20.0, train->maximumSpeed());
+                operatorSpeedLimits_[cmd.trainId] = targetSpd;
+                safetySpeedLimits_.erase(cmd.trainId);
+                trainsHeldBySafety_.erase(cmd.trainId);
                 train->setState(TrainState::Running);
+                train->setVelocity(targetSpd);
+                train->setAcceleration(0.5);
                 worldState_.operatorMessage = "[OK] Train #" + std::to_string(cmd.trainId) + " RESUMED.";
             }
             break;
@@ -588,11 +590,19 @@ void ThreadOrchestrator::physicsLoop()
                 // Fail-safe restricted speed (10 m/s) under radio blackout
                 safetyLimit = std::min(safetyLimit, 10.0);
             }
-            train->setVelocity(std::min({
-                newVelocity,
-                operatorLimit,
-                safetyLimit,
-                train->maximumSpeed()}));
+            if (train->state() == TrainState::Stopped)
+            {
+                train->setVelocity(0.0);
+                train->setAcceleration(0.0);
+            }
+            else
+            {
+                train->setVelocity(std::min({
+                    newVelocity,
+                    operatorLimit,
+                    safetyLimit,
+                    train->maximumSpeed()}));
+            }
         }
 
         worldState_.simulationTime += dt;
@@ -648,7 +658,7 @@ void ThreadOrchestrator::safetyLoop()
                     }
                 }
 
-                // Auto-Resume: If a train was held but no longer has active conflicts/commands, resume it
+                // Auto-Resume: If a train was held at a signal / speed reduction but no longer has active conflicts/commands, resume it
                 std::vector<TrainId> toResume;
                 for (const auto tid : trainsHeldBySafety_)
                 {
@@ -683,13 +693,13 @@ void ThreadOrchestrator::safetyLoop()
                             const double targetSpd = operatorSpeedLimits_.contains(tid)
                                 ? operatorSpeedLimits_[tid]
                                 : std::min(20.0, train->maximumSpeed());
-                            train->setVelocity(std::max(train->velocity(), std::min(12.0, targetSpd)));
+                            train->setVelocity(std::max(train->velocity(), std::min(15.0, targetSpd)));
                             train->setAcceleration(0.5);
                         }
                     }
                     std::unique_lock lock(worldMutex_);
                     worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +
-                        std::to_string(tid) + " -> Safe to proceed, re-accelerating.";
+                        std::to_string(tid) + " -> Signal cleared, re-accelerating.";
                 }
             }
             catch (const std::exception&)

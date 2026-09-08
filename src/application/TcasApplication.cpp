@@ -444,16 +444,25 @@ void TcasApplication::removeTrainInteractive()
     int tid = readInteger("Enter Train ID to delete (0=Cancel) > ", 0);
     if (tid > 0)
     {
-        if (trainManager_.removeTrain(static_cast<TrainId>(tid)))
+        // Check that the train actually exists (read-only, safe before posting command)
+        const auto snap = orchestrator_ ? orchestrator_->snapshot() : orchestrator::WorldState{};
+        const bool found = std::any_of(snap.trains.begin(), snap.trains.end(),
+            [tid](const auto& t) { return t.id == static_cast<TrainId>(tid); });
+        if (found)
         {
+            if (pipeline_)  { pipeline_->removeRoute(static_cast<TrainId>(tid)); }
+            std::erase_if(currentRoutes_, [tid](const auto& r) {
+                return r.trainId == static_cast<TrainId>(tid);
+            });
             if (orchestrator_)
             {
-                orchestrator_->postCommand({orchestrator::UserCommandType::RemoveTrain, static_cast<TrainId>(tid)});
-                orchestrator_->setOperatorMessage("[OK] Train #" + std::to_string(tid) + " removed from fleet.");
+                // All TrainManager mutation is routed through the physics lock
+                orchestrator_->postCommand({orchestrator::UserCommandType::RemoveTrain,
+                    static_cast<TrainId>(tid)});
+                orchestrator_->setOperatorMessage("[OK] Train #" + std::to_string(tid) +
+                    " removed from fleet.");
             }
-            if (pipeline_) { pipeline_->removeRoute(static_cast<TrainId>(tid)); }
-            std::erase_if(currentRoutes_, [tid](const auto& r) { return r.trainId == static_cast<TrainId>(tid); });
-            std::cout << "\n[OK] Train #" << tid << " removed.\n";
+            std::cout << "\n[OK] Train #" << tid << " removal queued.\n";
         }
         else
         {

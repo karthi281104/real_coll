@@ -390,6 +390,7 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
 
     // Release stale reservations from previous cycles
     reservations_.clearReleased();
+    reservations_.clearExpired(currentTime); // Expire zones the clock has already passed
 
     while (!conflictQueue.empty())
     {

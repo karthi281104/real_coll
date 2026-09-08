@@ -70,6 +70,19 @@ void ResourceReservationManager::clearReleased()
         reservations_.end());
 }
 
+void ResourceReservationManager::clearExpired(TimeSeconds currentTime)
+{
+    reservations_.erase(
+        std::remove_if(
+            reservations_.begin(), reservations_.end(),
+            [currentTime](const ResourceReservation& reservation)
+            {
+                // A reservation expires when the simulation clock passes its end window.
+                return reservation.endTime <= currentTime;
+            }),
+        reservations_.end());
+}
+
 bool ResourceReservationManager::isReserved(
     const ConflictZone& zone,
     TimeSeconds startTime,

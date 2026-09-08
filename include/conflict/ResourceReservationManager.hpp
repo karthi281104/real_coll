@@ -23,6 +23,9 @@ public:
 
     void clearReleased();
 
+    // Remove reservations whose endTime is before currentTime (train already cleared the zone).
+    void clearExpired(TimeSeconds currentTime);
+
     [[nodiscard]]
     bool isReserved(
         const ConflictZone& zone,

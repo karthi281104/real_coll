@@ -434,6 +434,8 @@ void ThreadOrchestrator::processUserCommandsLocked()
             failedSensors_.erase(cmd.trainId);
             operatorSpeedLimits_.erase(cmd.trainId);
             safetySpeedLimits_.erase(cmd.trainId);
+            trainsHeldBySafety_.erase(cmd.trainId);
+            trainManager_.removeTrain(cmd.trainId); // Safe: always done under worldMutex_
             break;
 
         case UserCommandType::ChangeRoute:
@@ -590,7 +592,8 @@ void ThreadOrchestrator::physicsLoop()
                 // Fail-safe restricted speed (10 m/s) under radio blackout
                 safetyLimit = std::min(safetyLimit, 10.0);
             }
-            if (train->state() == TrainState::Stopped)
+            if (train->state() == TrainState::Stopped ||
+                train->state() == TrainState::EmergencyBrake)
             {
                 train->setVelocity(0.0);
                 train->setAcceleration(0.0);
@@ -638,27 +641,29 @@ void ThreadOrchestrator::safetyLoop()
             try
             {
                 const SafetyCycleResult result = step(state);
-                {
-                    std::unique_lock lock(worldMutex_);
-                    worldState_.predictions = result.predictions;
-                    worldState_.activeConflicts = result.activeConflicts;
-                    worldState_.reservations = result.reservations;
-                    worldState_.commands = result.commands;
-                    worldState_.decisions = result.decisions;
-                }
+                std::unique_lock lock(worldMutex_);
+                worldState_.predictions    = result.predictions;
+                worldState_.activeConflicts = result.activeConflicts;
+                worldState_.reservations   = result.reservations;
+                worldState_.commands       = result.commands;
+                worldState_.decisions      = result.decisions;
+
                 std::unordered_set<TrainId> commandedThisCycle;
                 for (const auto& command : result.commands)
                 {
                     commandQueue_.push(command);
                     commandedThisCycle.insert(command.trainId);
                     if (command.type == safety::SafetyCommandType::HoldAtSignal ||
-                        command.type == safety::SafetyCommandType::ReduceSpeed)
+                        command.type == safety::SafetyCommandType::ReduceSpeed ||
+                        command.type == safety::SafetyCommandType::EmergencyBrake)
                     {
                         trainsHeldBySafety_.insert(command.trainId);
                     }
                 }
 
-                // Auto-Resume: If a train was held at a signal / speed reduction but no longer has active conflicts/commands, resume it
+                // Auto-Resume: If a train was held at a signal/speed reduction but no longer
+                // has active conflicts or commands, resume it. EmergencyBrake is NOT auto-resumed
+                // — it requires explicit operator reset (SetSpeed or ResumeTrain).
                 std::vector<TrainId> toResume;
                 for (const auto tid : trainsHeldBySafety_)
                 {
@@ -697,7 +702,6 @@ void ThreadOrchestrator::safetyLoop()
                             train->setAcceleration(0.5);
                         }
                     }
-                    std::unique_lock lock(worldMutex_);
                     worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +
                         std::to_string(tid) + " -> Signal cleared, re-accelerating.";
                 }

@@ -521,6 +521,7 @@ void TcasApplication::listFleet()
                       << std::setw(11) << trainTypeName(t.type) << ' '
                       << std::setw(7) << t.trackId << ' '
                       << std::setw(13) << std::fixed << std::setprecision(1) << t.position << ' '
+                      << std::setw(11) << t.velocity << ' '
                       << std::setw(7) << effectiveLimit << ' '
                       << stateStr << '\n';
         }
@@ -784,6 +785,7 @@ void TcasApplication::runLiveRadar()
                       << std::setw(11) << trainTypeName(t.type) << ' '
                       << std::setw(7) << t.trackId << ' '
                       << std::setw(13) << std::fixed << std::setprecision(1) << t.position << ' '
+                      << std::setw(11) << t.velocity << ' '
                       << std::setw(7) << effectiveLimit << ' '
                       << stateStr << '\n';
         }

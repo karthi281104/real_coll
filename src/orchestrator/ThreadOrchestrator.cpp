@@ -708,15 +708,14 @@ void ThreadOrchestrator::safetyLoop()
                     safetySpeedLimits_.erase(tid);
                     if (auto* train = trainManager_.getTrain(tid))
                     {
-                        if (train->state() == TrainState::Braking ||
-                            train->state() == TrainState::Stopped)
+                        train->setState(TrainState::Running);
+                        train->setAcceleration(0.5);
+                        if (train->velocity() < 1.0)
                         {
-                            train->setState(TrainState::Running);
                             const double targetSpd = operatorSpeedLimits_.contains(tid)
                                 ? operatorSpeedLimits_[tid]
                                 : std::min(20.0, train->maximumSpeed());
                             train->setVelocity(std::max(train->velocity(), std::min(15.0, targetSpd)));
-                            train->setAcceleration(0.5);
                         }
                     }
                     worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +

@@ -125,31 +125,24 @@ double readDoubleValue(const std::string& prompt, double defaultValue = 0.0)
 TcasApplication::TcasApplication()
 {
     buildNetwork();
-    startSimulation();
+    initDefaultScenario();
+}
 
-    auto r1 = scenario::RouteCatalog::dispatchCatalogRoute(1, network_, trainManager_);
+void TcasApplication::initDefaultScenario()
+{
+    auto r1 = scenario::RouteCatalog::dispatchCatalogRoute(1, network_, trainManager_, 101);
     if (r1.success)
     {
         currentRoutes_.push_back(r1.trainRoute);
-        if (pipeline_) { pipeline_->addOrUpdateRoute(r1.trainRoute); }
-        if (orchestrator_)
-        {
-            orchestrator_->setTrainRoute(r1.trainId, r1.trainRoute.currentTrackId, r1.trainRoute.route);
-            orchestrator_->addTrain(r1.trainId);
-        }
     }
 
-    auto r2 = scenario::RouteCatalog::dispatchCatalogRoute(2, network_, trainManager_);
+    auto r2 = scenario::RouteCatalog::dispatchCatalogRoute(2, network_, trainManager_, 102);
     if (r2.success)
     {
         currentRoutes_.push_back(r2.trainRoute);
-        if (pipeline_) { pipeline_->addOrUpdateRoute(r2.trainRoute); }
-        if (orchestrator_)
-        {
-            orchestrator_->setTrainRoute(r2.trainId, r2.trainRoute.currentTrackId, r2.trainRoute.route);
-            orchestrator_->addTrain(r2.trainId);
-        }
     }
+
+    startSimulation();
 }
 
 TcasApplication::~TcasApplication()
@@ -826,19 +819,37 @@ void TcasApplication::runLiveRadar()
         }
         if (opt == "s" || opt == "stream")
         {
+            std::cout << "\n  --- Streaming 5 seconds of live telemetry ---\n";
             for (int i = 0; i < 5; ++i)
             {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
                 const auto liveSnap = orchestrator_->snapshot();
-                std::cout << "  [t=" << std::fixed << std::setprecision(1) << liveSnap.simulationTime << "s] ";
-                for (const auto& tr : liveSnap.trains)
+                std::cout << "  [t=" << std::fixed << std::setprecision(1) << liveSnap.simulationTime << "s]\n";
+                if (liveSnap.trains.empty())
                 {
-                    std::cout << "#" << tr.id << " @" << static_cast<int>(tr.position) << "m ("
-                              << static_cast<int>(tr.velocity) << "m/s " << trainStateName(tr.state) << ") ";
+                    std::cout << "    (No active trains in simulation)\n";
                 }
-                std::cout << "\n";
+                else
+                {
+                    for (const auto& tr : liveSnap.trains)
+                    {
+                        const double effLimit = liveSnap.communicationFailure
+                            ? std::min(tr.maximumSpeed, 10.0)
+                            : tr.maximumSpeed;
+                        std::string st = trainStateName(tr.state);
+                        if (tr.sensorFailure) st += " [SENS-FAULT]";
+
+                        std::cout << "    >> Train #" << tr.id
+                                  << " [" << std::setw(9) << std::left << trainTypeName(tr.type) << "]"
+                                  << " Track " << std::setw(3) << tr.trackId
+                                  << " @ " << std::setw(6) << std::right << static_cast<int>(tr.position) << "m"
+                                  << " | Speed: " << std::setw(4) << static_cast<int>(tr.velocity) << " m/s (Limit: "
+                                  << static_cast<int>(effLimit) << ")"
+                                  << " | " << st << "\n";
+                    }
+                }
             }
-            std::cout << "\n";
+            std::cout << "  ---------------------------------------------\n\n";
         }
     }
 }
@@ -904,8 +915,8 @@ void TcasApplication::resetSimulation()
         orchestrator_.reset();
     }
     buildNetwork();
-    startSimulation();
-    std::cout << "\n[OK] Simulation reset complete. Network cleared.\n";
+    initDefaultScenario();
+    std::cout << "\n[OK] Simulation reset complete. Default routes (R-01 and R-02) re-initialized.\n";
     waitForEnter();
 }
 

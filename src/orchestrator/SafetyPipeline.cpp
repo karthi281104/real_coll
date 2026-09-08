@@ -257,12 +257,16 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         std::vector<prediction::FutureState> trajectory;
         try
         {
+            constexpr std::array<TimeSeconds, 7> kPipelineHorizons{
+                5.0, 10.0, 20.0, 30.0, 60.0, 90.0, 120.0
+            };
             trajectory =
-                prediction::PredictionEngine::predictStandardHorizon(
+                prediction::PredictionEngine::predict(
                     *proxy,
                     network_,
                     trainRoute.route,
                     effectiveTrackId,
+                    std::vector<TimeSeconds>(kPipelineHorizons.begin(), kPipelineHorizons.end()),
                     1.0 /* m uncertainty */);
         }
         catch (const std::exception& /*e*/)

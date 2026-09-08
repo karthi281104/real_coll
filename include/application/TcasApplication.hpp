@@ -82,6 +82,7 @@ private:
     void resetSimulation();
 
     void buildNetwork();
+    void initDefaultScenario();
 
     infrastructure::RailwayNetwork network_;
     train::TrainManager trainManager_;

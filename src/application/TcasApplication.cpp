@@ -170,6 +170,7 @@ void TcasApplication::buildNetwork()
     network_.addNode(Node(8, "Platform A",        NodeType::Platform));
 
     network_.addTrack(Track(101, 1, 2, 2000.0, 35.0, 0.000));
+    network_.addTrack(Track(201, 2, 1, 2000.0, 35.0, 0.000));
     network_.addTrack(Track(102, 2, 3, 1500.0, 30.0, 0.020));
     network_.addTrack(Track(103, 3, 4, 2500.0, 40.0, -0.015));
     network_.addTrack(Track(104, 2, 5, 3000.0, 25.0, 0.010));

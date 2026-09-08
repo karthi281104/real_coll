@@ -54,6 +54,8 @@ void ScenarioManager::buildBaseNetwork()
     // Directed tracks
     //  Central -> Alpha
     network_.addTrack(infrastructure::Track(101, 1, 2, 2000.0, 35.0, 0.000));
+    //  Alpha -> Central (opposing track for Head-On collision scenario)
+    network_.addTrack(infrastructure::Track(201, 2, 1, 2000.0, 35.0, 0.000));
     //  Alpha -> Beta
     network_.addTrack(infrastructure::Track(102, 2, 3, 1500.0, 30.0, 0.020));
     //  Beta -> North

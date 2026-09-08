@@ -23,6 +23,7 @@ infrastructure::RailwayNetwork buildTestNetwork()
     net.addNode(Node(8, "Platform A",        NodeType::Platform));
 
     net.addTrack(Track(101, 1, 2, 2000.0, 35.0, 0.000));
+    net.addTrack(Track(201, 2, 1, 2000.0, 35.0, 0.000));
     net.addTrack(Track(102, 2, 3, 1500.0, 30.0, 0.020));
     net.addTrack(Track(103, 3, 4, 2500.0, 40.0, -0.015));
     net.addTrack(Track(104, 2, 5, 3000.0, 25.0, 0.010));

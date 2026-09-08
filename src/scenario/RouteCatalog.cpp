@@ -18,92 +18,92 @@ const std::vector<CatalogRouteInfo> kCatalogRoutes = {
     {
         1,
         "R-01",
-        "InterCity North Express (Central -> North)",
+        "South Shore Express (Central -> South Harbor)",
         TrainType::Express,
-        1, 4,
-        101, 100.0, 32.0,
-        "Mainline fast service. Converges with R-02 at Alpha Jct (Node 2)."
+        1, 5,
+        101, 100.0, 30.0,
+        "Mainline to South Harbor via Alpha Jct. Disjoint path with R-02 [NO COLLISION]."
     },
     {
         2,
         "R-02",
-        "Heavy Yard Freight (Approach -> Freight Yard)",
-        TrainType::Freight,
-        6, 7,
-        105, 750.0, 20.0,
-        "Heavy cargo. Converges across Alpha Junction (Node 2) with R-01 [JUNCTION CONFLICT]."
+        "North Corridor Commuter (Beta Jct -> North)",
+        TrainType::Passenger,
+        3, 4,
+        103, 100.0, 25.0,
+        "Beta to North Terminal commuter run. Disjoint path with R-01 [NO COLLISION]."
     },
     {
         3,
         "R-03",
-        "Southbound Local (Central -> South Harbor)",
-        TrainType::Passenger,
-        1, 5,
-        101, 400.0, 20.0,
-        "Shares Track 101 with R-01/R-04 [SAME-TRACK SPACING / REAR-END CONFLICT]."
+        "Eastbound Mainline Express (Central -> Alpha Jct)",
+        TrainType::Express,
+        1, 2,
+        101, 200.0, 30.0,
+        "Eastbound on Track 101 towards Alpha Jct [HEAD-ON COLLISION with R-04]."
     },
     {
         4,
         "R-04",
-        "High-Speed Overtaker (Central -> North)",
-        TrainType::Express,
-        1, 4,
-        101, 50.0, 38.0,
-        "Dispatched behind preceding trains at high speed [RAPID REAR-END CLOSING]."
+        "Westbound Counter-Flow (Alpha Jct -> Central)",
+        TrainType::Passenger,
+        2, 1,
+        201, 300.0, 30.0,
+        "Westbound opposing run on single corridor Track 201 [HEAD-ON COLLISION with R-03]."
     },
     {
         5,
         "R-05",
-        "Island Shuttle Alpha (South Harbor -> Platform A)",
-        TrainType::Passenger,
-        5, 8,
-        107, 50.0, 16.0,
-        "Approaches Platform A from South. Converges with R-06 [PLATFORM CONFLICT]."
+        "Slow Heavy Freight Lead (Central -> North)",
+        TrainType::Freight,
+        1, 4,
+        101, 700.0, 15.0,
+        "Slow-moving freight ahead on Track 101 [REAR-END COLLISION with R-06]."
     },
     {
         6,
         "R-06",
-        "Island Shuttle Beta (Beta Jct -> Platform A)",
-        TrainType::Passenger,
-        3, 8,
-        108, 50.0, 16.0,
-        "Approaches Platform A from North. Converges with R-05 [PLATFORM CONFLICT]."
+        "High-Speed Overtaker (Central -> North)",
+        TrainType::Express,
+        1, 4,
+        101, 100.0, 35.0,
+        "Dispatched behind R-05 at 35 m/s on Track 101 [REAR-END COLLISION with R-05]."
     },
     {
         7,
         "R-07",
-        "Cross-Country Freight (Approach -> South Harbor)",
+        "Approach Yard Freight (Freight Approach -> Yard)",
         TrainType::Freight,
-        6, 5,
-        105, 100.0, 17.0,
-        "Industrial connection crossing Alpha Junction towards South Harbor."
+        6, 7,
+        105, 1500.0, 20.0,
+        "Crosses Alpha Junction at t=25s [JUNCTION COLLISION with R-08]."
     },
     {
         8,
         "R-08",
-        "North Corridor Commuter (Alpha Jct -> North)",
+        "Alpha Converging Passenger (Central -> North)",
         TrainType::Passenger,
-        2, 4,
-        102, 100.0, 26.0,
-        "Intermediate mainline commuter run via Beta Junction."
+        1, 4,
+        101, 1375.0, 25.0,
+        "Converges at Alpha Junction at t=25s [JUNCTION COLLISION with R-07]."
     },
     {
         9,
         "R-09",
-        "Yard Shunting Transfer (Alpha Jct -> Freight Yard)",
-        TrainType::Freight,
-        2, 7,
-        106, 50.0, 14.0,
-        "Low-speed yard shunting run on dedicated industrial spur."
+        "South Harbor Platform Feeder (South Harbor -> Platform A)",
+        TrainType::Passenger,
+        5, 8,
+        107, 100.0, 16.0,
+        "Arrives at Platform A at t=25s [PLATFORM CONFLICT with R-10]."
     },
     {
         10,
         "R-10",
-        "South Coastal Express (Alpha Jct -> South Harbor)",
+        "Beta Platform Feeder (Beta Jct -> Platform A)",
         TrainType::Express,
-        2, 5,
-        104, 100.0, 28.0,
-        "Regional branch express to the coastal passenger terminal."
+        3, 8,
+        108, 200.0, 16.0,
+        "Arrives at Platform A at t=25s [PLATFORM CONFLICT with R-09]."
     }
 };
 

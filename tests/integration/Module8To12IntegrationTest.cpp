@@ -247,6 +247,7 @@ TEST(Module8To12IntegrationTest, Diagnostic100SecondSimulation)
     network.addNode(Node(8, "Platform A",        NodeType::Platform));
 
     network.addTrack(Track(101, 1, 2, 2000.0, 35.0, 0.000));
+    network.addTrack(Track(201, 2, 1, 2000.0, 35.0, 0.000));
     network.addTrack(Track(102, 2, 3, 1500.0, 30.0, 0.020));
     network.addTrack(Track(103, 3, 4, 2500.0, 40.0, -0.015));
     network.addTrack(Track(104, 2, 5, 3000.0, 25.0, 0.010));
@@ -255,8 +256,8 @@ TEST(Module8To12IntegrationTest, Diagnostic100SecondSimulation)
     network.addTrack(Track(107, 5, 8,  500.0, 20.0, 0.000));
     network.addTrack(Track(108, 3, 8,  600.0, 20.0, 0.000));
 
-    auto r1 = scenario::RouteCatalog::dispatchCatalogRoute(1, network, manager, 101);
-    auto r2 = scenario::RouteCatalog::dispatchCatalogRoute(2, network, manager, 102);
+    auto r1 = scenario::RouteCatalog::dispatchCatalogRoute(8, network, manager, 101);
+    auto r2 = scenario::RouteCatalog::dispatchCatalogRoute(7, network, manager, 102);
     ASSERT_TRUE(r1.success);
     ASSERT_TRUE(r2.success);
 

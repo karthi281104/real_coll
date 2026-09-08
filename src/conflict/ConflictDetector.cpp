@@ -196,10 +196,35 @@ std::vector<Conflict> ConflictDetector::detect(
             const auto& b0 = trajectoryB[j];
             const auto& b1 = trajectoryB[j + 1];
 
-            if (a0.trackId != a1.trackId || a0.trackId != b0.trackId ||
-                b0.trackId != b1.trackId)
+            if (a0.trackId != a1.trackId || b0.trackId != b1.trackId)
             {
                 continue;
+            }
+
+            const auto* trackA = network.getTrack(a0.trackId);
+            const auto* trackB = network.getTrack(b0.trackId);
+            if (trackA == nullptr || trackB == nullptr)
+            {
+                continue;
+            }
+
+            const bool sameTrack = (a0.trackId == b0.trackId);
+            const bool opposingTrack = (trackA->source() == trackB->destination() &&
+                                        trackA->destination() == trackB->source());
+
+            if (!sameTrack && !opposingTrack)
+            {
+                continue;
+            }
+
+            prediction::FutureState b0_mapped = b0;
+            prediction::FutureState b1_mapped = b1;
+            if (opposingTrack)
+            {
+                b0_mapped.position = trackA->length() - b0.position;
+                b0_mapped.velocity = -b0.velocity;
+                b1_mapped.position = trackA->length() - b1.position;
+                b1_mapped.velocity = -b1.velocity;
             }
 
             DistanceMeters minimumSeparation =
@@ -207,7 +232,7 @@ std::vector<Conflict> ConflictDetector::detect(
             TimeSeconds firstTime = 0.0;
             TimeSeconds lastTime = 0.0;
             if (!hasTemporalConflict(
-                    a0, a1, b0, b1, minimumSeparation, firstTime, lastTime))
+                    a0, a1, b0_mapped, b1_mapped, minimumSeparation, firstTime, lastTime))
             {
                 continue;
             }
@@ -215,7 +240,7 @@ std::vector<Conflict> ConflictDetector::detect(
             const Conflict candidate{
                 trainA,
                 trainB,
-                classifySameTrack(a0, b0),
+                opposingTrack ? ConflictType::HeadOn : classifySameTrack(a0, b0),
                 a0.trackId,
                 0,
                 firstTime,

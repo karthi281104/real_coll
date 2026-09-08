@@ -134,8 +134,8 @@ TcasApplication::TcasApplication()
         if (pipeline_) { pipeline_->addOrUpdateRoute(r1.trainRoute); }
         if (orchestrator_)
         {
-            orchestrator_->addTrain(r1.trainId);
             orchestrator_->setTrainRoute(r1.trainId, r1.trainRoute.currentTrackId, r1.trainRoute.route);
+            orchestrator_->addTrain(r1.trainId);
         }
     }
 
@@ -146,8 +146,8 @@ TcasApplication::TcasApplication()
         if (pipeline_) { pipeline_->addOrUpdateRoute(r2.trainRoute); }
         if (orchestrator_)
         {
-            orchestrator_->addTrain(r2.trainId);
             orchestrator_->setTrainRoute(r2.trainId, r2.trainRoute.currentTrackId, r2.trainRoute.route);
+            orchestrator_->addTrain(r2.trainId);
         }
     }
 }
@@ -377,9 +377,9 @@ void TcasApplication::dispatchCatalogInteractive()
             if (pipeline_) { pipeline_->addOrUpdateRoute(result.trainRoute); }
             if (orchestrator_)
             {
-                orchestrator_->addTrain(result.trainId);
                 orchestrator_->setTrainRoute(
                     result.trainId, result.trainRoute.currentTrackId, result.trainRoute.route);
+                orchestrator_->addTrain(result.trainId);
                 orchestrator_->setOperatorMessage(result.message);
             }
             std::cout << "\n[SUCCESS] " << result.message << "\n";
@@ -424,9 +424,9 @@ void TcasApplication::dispatchCustomInteractive()
         if (pipeline_) { pipeline_->addOrUpdateRoute(result.trainRoute); }
         if (orchestrator_)
         {
-            orchestrator_->addTrain(result.trainId);
             orchestrator_->setTrainRoute(
                 result.trainId, result.trainRoute.currentTrackId, result.trainRoute.route);
+            orchestrator_->addTrain(result.trainId);
             orchestrator_->setOperatorMessage(result.message);
         }
         std::cout << "\n[SUCCESS] " << result.message << "\n";

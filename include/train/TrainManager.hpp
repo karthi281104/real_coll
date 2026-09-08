@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <shared_mutex>
 #include <unordered_map>
 
 namespace tcas::train
@@ -33,6 +34,7 @@ public:
     void clear() noexcept;
 
 private:
+    mutable std::shared_mutex mutex_;
     std::unordered_map<
         TrainId,
         std::unique_ptr<Train>

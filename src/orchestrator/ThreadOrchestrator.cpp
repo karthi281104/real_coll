@@ -202,6 +202,10 @@ void ThreadOrchestrator::removeTrain(TrainId trainId)
         trainIds_.erase(it);
         navStates_.erase(trainId);
         failedSensors_.erase(trainId);
+        operatorSpeedLimits_.erase(trainId);
+        safetySpeedLimits_.erase(trainId);
+        trainsHeldBySafety_.erase(trainId);
+        trainManager_.removeTrain(trainId);
         updateWorldSnapshotLocked();
     }
 }
@@ -654,8 +658,7 @@ void ThreadOrchestrator::safetyLoop()
                     commandQueue_.push(command);
                     commandedThisCycle.insert(command.trainId);
                     if (command.type == safety::SafetyCommandType::HoldAtSignal ||
-                        command.type == safety::SafetyCommandType::ReduceSpeed ||
-                        command.type == safety::SafetyCommandType::EmergencyBrake)
+                        command.type == safety::SafetyCommandType::ReduceSpeed)
                     {
                         trainsHeldBySafety_.insert(command.trainId);
                     }

@@ -77,6 +77,9 @@ const char* trainStateToString(TrainState state)
 
     case TrainState::EmergencyBrake:
         return "EmergencyBrake";
+
+    case TrainState::Completed:
+        return "Completed";
     }
 
     return "Unknown";

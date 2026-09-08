@@ -49,6 +49,7 @@ const char* trainStateName(TrainState s) noexcept
     case TrainState::Braking:        return "BRAKING";
     case TrainState::Stopped:        return "STOPPED";
     case TrainState::EmergencyBrake: return "EMERGENCY";
+    case TrainState::Completed:      return "ARRIVED";
     }
     return "UNKNOWN";
 }
@@ -720,6 +721,17 @@ void TcasApplication::listFleet()
                 ? std::min(t.maximumSpeed, 10.0)
                 : t.maximumSpeed;
             std::string stateStr = trainStateName(t.state);
+            if (t.state == TrainState::Stopped)
+            {
+                for (const auto& cmd : snap.commands)
+                {
+                    if (cmd.trainId == t.id && cmd.type == safety::SafetyCommandType::HoldAtSignal)
+                    {
+                        stateStr = "HOLD (SIG)";
+                        break;
+                    }
+                }
+            }
             if (t.sensorFailure)
             {
                 stateStr += " [SENS-FAULT]";
@@ -984,6 +996,17 @@ void TcasApplication::runLiveRadar()
                 ? std::min(t.maximumSpeed, 10.0)
                 : t.maximumSpeed;
             std::string stateStr = trainStateName(t.state);
+            if (t.state == TrainState::Stopped)
+            {
+                for (const auto& cmd : snap.commands)
+                {
+                    if (cmd.trainId == t.id && cmd.type == safety::SafetyCommandType::HoldAtSignal)
+                    {
+                        stateStr = "HOLD (SIG)";
+                        break;
+                    }
+                }
+            }
             if (t.sensorFailure)
             {
                 stateStr += " [SENS-FAULT]";
@@ -1051,6 +1074,17 @@ void TcasApplication::runLiveRadar()
                             ? std::min(tr.maximumSpeed, 10.0)
                             : tr.maximumSpeed;
                         std::string st = trainStateName(tr.state);
+                        if (tr.state == TrainState::Stopped)
+                        {
+                            for (const auto& cmd : liveSnap.commands)
+                            {
+                                if (cmd.trainId == tr.id && cmd.type == safety::SafetyCommandType::HoldAtSignal)
+                                {
+                                    st = "HOLD (SIG)";
+                                    break;
+                                }
+                            }
+                        }
                         if (tr.sensorFailure) st += " [SENS-FAULT]";
 
                         std::cout << "    >> Train #" << tr.id

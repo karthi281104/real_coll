@@ -224,6 +224,11 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
 
         // If the train has finished its route and docked at the terminal station,
         // it has cleared the mainline corridor and should not block following trains.
+        if (snap->state == TrainState::Completed)
+        {
+            continue;
+        }
+
         if (snap->state == TrainState::Stopped && !trainRoute.route.tracks.empty())
         {
             if (snap->trackId == trainRoute.route.tracks.back() || trainRoute.currentTrackId == trainRoute.route.tracks.back())
@@ -370,17 +375,37 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         const double brakingDist =
             physics::KinematicsEngine::emergencyStoppingDistance(
                 speed, yieldCtx->proxy->emergencyBraking(), gradient);
-        const double availDist = distanceToNode(
-            network_,
-            *yieldCtx->route,
-            yieldCtx->currentTrackId,
-            yieldCtx->proxy->position(),
-            detected.resourceNodeId);
 
-        if (availDist <= 0.0)
+        double availDist = 0.0;
+        if (detected.resourceNodeId != 0)
         {
-            // Node is already behind the yielding train, conflict has already been passed
-            continue;
+            availDist = distanceToNode(
+                network_,
+                *yieldCtx->route,
+                yieldCtx->currentTrackId,
+                yieldCtx->proxy->position(),
+                detected.resourceNodeId);
+            if (availDist <= 0.0)
+            {
+                // Node is already behind the yielding train, conflict has already been passed
+                continue;
+            }
+        }
+        else
+        {
+            // Same-track (Rear-End) or opposing-track (Head-On) conflict
+            const auto* otherCtx = (yieldCtx == ctxA) ? ctxB : ctxA;
+            if (detected.type == conflict::ConflictType::HeadOn)
+            {
+                const auto* trk = network_.getTrack(yieldCtx->currentTrackId);
+                const double trkLen = trk != nullptr ? trk->length() : 2000.0;
+                availDist = std::max(15.0, trkLen - yieldCtx->proxy->position() - otherCtx->proxy->position());
+            }
+            else
+            {
+                // Rear-End: yieldCtx is trailing, otherCtx is lead
+                availDist = std::max(15.0, otherCtx->proxy->position() - yieldCtx->proxy->position());
+            }
         }
         const double safetyMargin = availDist - brakingDist;
 
@@ -451,19 +476,29 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             detected.trackId
         };
 
-        // Reservations manage absolute simulation time intervals
-        const bool reserved = reservations_.request(
-            prioCtx->proxy->id(),
-            zone,
-            currentTime + detected.firstConflictTime,
-            currentTime + detected.lastConflictTime);
-
-        if (!reserved)
+        if (detected.resourceNodeId != 0)
         {
-            // Already reserved by someone else — skip this conflict
-            continue;
+            const bool reserved = reservations_.request(
+                prioCtx->proxy->id(),
+                zone,
+                currentTime + detected.firstConflictTime,
+                currentTime + detected.lastConflictTime);
+
+            if (!reserved)
+            {
+                // Resource already reserved by another priority movement.
+                // The yielding train must definitively hold at approach signal!
+                safety::SafetyCommand holdCmd;
+                holdCmd.type = safety::SafetyCommandType::HoldAtSignal;
+                holdCmd.trainId = yieldCtx->proxy->id();
+                holdCmd.targetSpeed = 0.0;
+                holdCmd.issuedAt = currentTime;
+                holdCmd.riskScore = top.risk.score;
+                result.commands.push_back(holdCmd);
+                continue;
+            }
+            result.reservations = reservations_.reservations();
         }
-        result.reservations = reservations_.reservations();
 
         // Braking feasibility for yielding train
         const auto* yieldTrack = network_.getTrack(yieldCtx->currentTrackId);
@@ -473,17 +508,35 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         const double brakingDist =
             physics::KinematicsEngine::emergencyStoppingDistance(
                 speed, yieldCtx->proxy->emergencyBraking(), gradient);
-        const double availDist = distanceToNode(
-            network_,
-            *yieldCtx->route,
-            yieldCtx->currentTrackId,
-            yieldCtx->proxy->position(),
-            detected.resourceNodeId);
 
-        if (availDist <= 0.0)
+        double availDist = 0.0;
+        if (detected.resourceNodeId != 0)
         {
-            // The junction/node is already behind the yielding train, conflict has cleared
-            continue;
+            availDist = distanceToNode(
+                network_,
+                *yieldCtx->route,
+                yieldCtx->currentTrackId,
+                yieldCtx->proxy->position(),
+                detected.resourceNodeId);
+            if (availDist <= 0.0)
+            {
+                // The junction/node is already behind the yielding train, conflict has cleared
+                continue;
+            }
+        }
+        else
+        {
+            const auto* otherCtx = (yieldCtx == ctxA) ? ctxB : ctxA;
+            if (detected.type == conflict::ConflictType::HeadOn)
+            {
+                const auto* trk = network_.getTrack(yieldCtx->currentTrackId);
+                const double trkLen = trk != nullptr ? trk->length() : 2000.0;
+                availDist = std::max(15.0, trkLen - yieldCtx->proxy->position() - otherCtx->proxy->position());
+            }
+            else
+            {
+                availDist = std::max(15.0, otherCtx->proxy->position() - yieldCtx->proxy->position());
+            }
         }
 
         // Use a 15m stopping clearance buffer before the fouling point

@@ -531,14 +531,23 @@ void ThreadOrchestrator::physicsLoop()
                 train->setVelocity(std::min(
                     train->velocity(), safetySpeedLimits_[command.trainId]));
                 train->setAcceleration(std::min(train->acceleration(), 0.0));
+                train->setState(TrainState::Braking);
+                train->setAcceleration(-train->serviceBraking());
                 break;
             case safety::SafetyCommandType::HoldAtSignal:
+                safetySpeedLimits_[command.trainId] = 0.0;
+                train->setVelocity(0.0);
+                train->setAcceleration(0.0);
+                train->setState(TrainState::Stopped);
+                break;
             case safety::SafetyCommandType::EmergencyBrake:
+                safetySpeedLimits_[command.trainId] = 0.0;
                 train->setVelocity(0.0);
                 train->setAcceleration(0.0);
                 train->setState(command.isEmergency()
                     ? TrainState::EmergencyBrake
                     : TrainState::Braking);
+                train->setState(TrainState::EmergencyBrake);
                 break;
             case safety::SafetyCommandType::NoAction:
                 break;
@@ -582,6 +591,7 @@ void ThreadOrchestrator::physicsLoop()
                             train->setVelocity(0.0);
                             train->setAcceleration(0.0);
                             train->setState(TrainState::Stopped);
+                            train->setState(TrainState::Completed);
                         }
                     }
                     else
@@ -611,18 +621,27 @@ void ThreadOrchestrator::physicsLoop()
                 safetyLimit = std::min(safetyLimit, 10.0);
             }
             if (train->state() == TrainState::Stopped ||
-                train->state() == TrainState::EmergencyBrake)
+                train->state() == TrainState::EmergencyBrake ||
+                train->state() == TrainState::Completed ||
+                (safetySpeedLimits_.contains(trainId) && safetySpeedLimits_[trainId] <= 0.0))
             {
                 train->setVelocity(0.0);
                 train->setAcceleration(0.0);
             }
             else
             {
-                train->setVelocity(std::min({
+                const double effectiveSpeed = std::min({
                     newVelocity,
                     operatorLimit,
                     safetyLimit,
-                    train->maximumSpeed()}));
+                    train->maximumSpeed()});
+                train->setVelocity(effectiveSpeed);
+
+                if (train->state() == TrainState::Braking && train->velocity() <= safetyLimit + 0.1)
+                {
+                    train->setAcceleration(0.0);
+                    train->setState(TrainState::Running);
+                }
             }
         }
 

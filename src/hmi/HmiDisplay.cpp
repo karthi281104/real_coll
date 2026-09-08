@@ -31,6 +31,7 @@ const char* trainStateName(const TrainState state)
     case TrainState::Braking: return "BRAKING";
     case TrainState::Stopped: return "STOPPED";
     case TrainState::EmergencyBrake: return "EMERGENCY";
+    case TrainState::Completed: return "ARRIVED";
     }
     return "UNKNOWN";
 }

@@ -52,7 +52,8 @@ enum class TrainState
     Running,
     Braking,
     Stopped,
-    EmergencyBrake
+    EmergencyBrake,
+    Completed
 };
 
 } // namespace tcas

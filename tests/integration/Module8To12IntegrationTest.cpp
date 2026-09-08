@@ -197,7 +197,7 @@ TEST(Module8To12IntegrationTest, RouteCatalogDispatchAndAutoResume)
 
     // Build base network
     ScenarioManager mgr(network, manager);
-    mgr.load(ScenarioType::JunctionConflict);
+    [[maybe_unused]] const auto baseScenario = mgr.load(ScenarioType::JunctionConflict);
 
     // Verify RouteCatalog can dispatch into this network
     const auto r1 = RouteCatalog::dispatchCatalogRoute(1, network, manager, 201);

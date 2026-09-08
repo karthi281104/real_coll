@@ -359,28 +359,67 @@ void TcasApplication::dispatchCatalogInteractive()
                   << "      Note: " << r.conflictNotice << "\n\n";
     }
     printSeparator();
-    int choice = readInteger("Enter Route ID to dispatch (1..10, 0=Cancel) > ", 0);
-    if (choice >= 1 && choice <= 10)
+    int choice = 0;
+    while (true)
     {
-        auto result = scenario::RouteCatalog::dispatchCatalogRoute(
-            choice, network_, trainManager_);
-        if (result.success)
+        std::cout << "Enter Route ID to dispatch (1..10, 0=Cancel) > ";
+        std::string line;
+        if (!std::getline(std::cin, line)) { return; }
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        if (line.empty())
         {
-            currentRoutes_.push_back(result.trainRoute);
-            if (pipeline_) { pipeline_->addOrUpdateRoute(result.trainRoute); }
-            if (orchestrator_)
+            std::cout << "  [ERROR] Input cannot be empty. Enter a route number (1..10) or 0 to cancel.\n";
+            continue;
+        }
+        try
+        {
+            std::size_t idx = 0;
+            choice = std::stoi(line, &idx);
+            if (idx != line.size())
             {
-                orchestrator_->setTrainRoute(
-                    result.trainId, result.trainRoute.currentTrackId, result.trainRoute.route);
-                orchestrator_->addTrain(result.trainId);
-                orchestrator_->setOperatorMessage(result.message);
+                std::cout << "  [ERROR] Invalid characters detected. Please enter digits only (1..10, 0=Cancel).\n";
+                continue;
             }
-            std::cout << "\n[SUCCESS] " << result.message << "\n";
         }
-        else
+        catch (...)
         {
-            std::cout << "\n[ERROR] Dispatch failed: " << result.message << "\n";
+            std::cout << "  [ERROR] Invalid integer. Please enter a valid number (1..10, 0=Cancel).\n";
+            continue;
         }
+
+        if (choice == 0)
+        {
+            std::cout << "  [INFO] Route dispatch canceled.\n";
+            waitForEnter();
+            return;
+        }
+        if (choice < 1 || choice > 10)
+        {
+            std::cout << "  [ERROR] Route ID " << choice << " not found. Available routes are 1 through 10. Please try again.\n";
+            continue;
+        }
+        break;
+    }
+
+    auto result = scenario::RouteCatalog::dispatchCatalogRoute(
+        choice, network_, trainManager_);
+    if (result.success)
+    {
+        currentRoutes_.push_back(result.trainRoute);
+        if (pipeline_) { pipeline_->addOrUpdateRoute(result.trainRoute); }
+        if (orchestrator_)
+        {
+            orchestrator_->setTrainRoute(
+                result.trainId, result.trainRoute.currentTrackId, result.trainRoute.route);
+            orchestrator_->addTrain(result.trainId);
+            orchestrator_->setOperatorMessage(result.message);
+        }
+        std::cout << "\n[SUCCESS] " << result.message << "\n";
+    }
+    else
+    {
+        std::cout << "\n[ERROR] Dispatch failed: " << result.message << "\n";
     }
     waitForEnter();
 }
@@ -388,24 +427,198 @@ void TcasApplication::dispatchCatalogInteractive()
 void TcasApplication::dispatchCustomInteractive()
 {
     printSeparator();
-    std::cout << " CUSTOM ROUTE DISPATCHER (Dijkstra Shortest Path)\n";
+    std::cout << " QUICK CUSTOM DISPATCH (Dijkstra Shortest Path)\n";
     printSeparator();
     std::cout << " Available Nodes:\n"
               << "  [1] Central Station  [2] Alpha Junction    [3] Beta Junction\n"
               << "  [4] North Terminal   [5] South Harbor      [6] Freight Approach\n"
               << "  [7] Freight Yard     [8] Platform A\n";
     printSeparator();
-    int src = readInteger("Enter Source Node (1..8, 0=Cancel) > ", 0);
-    if (src < 1 || src > 8) { return; }
-    int dst = readInteger("Enter Destination Node (1..8, 0=Cancel) > ", 0);
-    if (dst < 1 || dst > 8 || dst == src) { return; }
 
-    int typeInt = readInteger("Select Train Type (1=Express, 2=Passenger, 3=Freight) [2] > ", 2);
+    // Step 1: Source Node validation loop
+    int src = 0;
+    while (true)
+    {
+        std::cout << "Enter Source Node (1..8, 0=Cancel) > ";
+        std::string line;
+        if (!std::getline(std::cin, line)) { return; }
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        if (line.empty())
+        {
+            std::cout << "  [ERROR] Input cannot be empty. Please enter a node number (1..8) or 0 to cancel.\n";
+            continue;
+        }
+        try
+        {
+            std::size_t idx = 0;
+            src = std::stoi(line, &idx);
+            if (idx != line.size())
+            {
+                std::cout << "  [ERROR] Invalid characters detected. Please enter digits only (1..8, 0=Cancel).\n";
+                continue;
+            }
+        }
+        catch (...)
+        {
+            std::cout << "  [ERROR] Invalid integer. Please enter a valid number (1..8, 0=Cancel).\n";
+            continue;
+        }
+
+        if (src == 0)
+        {
+            std::cout << "  [INFO] Custom dispatch canceled.\n";
+            waitForEnter();
+            return;
+        }
+        if (src < 1 || src > 8)
+        {
+            std::cout << "  [ERROR] Node " << src << " does not exist. Available nodes are 1 through 8. Please try again.\n";
+            continue;
+        }
+        break;
+    }
+
+    // Step 2: Destination Node validation loop
+    int dst = 0;
+    while (true)
+    {
+        std::cout << "Enter Destination Node (1..8, 0=Cancel) > ";
+        std::string line;
+        if (!std::getline(std::cin, line)) { return; }
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        if (line.empty())
+        {
+            std::cout << "  [ERROR] Input cannot be empty. Please enter a node number (1..8) or 0 to cancel.\n";
+            continue;
+        }
+        try
+        {
+            std::size_t idx = 0;
+            dst = std::stoi(line, &idx);
+            if (idx != line.size())
+            {
+                std::cout << "  [ERROR] Invalid characters detected. Please enter digits only (1..8, 0=Cancel).\n";
+                continue;
+            }
+        }
+        catch (...)
+        {
+            std::cout << "  [ERROR] Invalid integer. Please enter a valid number (1..8, 0=Cancel).\n";
+            continue;
+        }
+
+        if (dst == 0)
+        {
+            std::cout << "  [INFO] Custom dispatch canceled.\n";
+            waitForEnter();
+            return;
+        }
+        if (dst < 1 || dst > 8)
+        {
+            std::cout << "  [ERROR] Node " << dst << " does not exist. Available nodes are 1 through 8. Please try again.\n";
+            continue;
+        }
+        if (dst == src)
+        {
+            std::cout << "  [ERROR] Destination node cannot be the same as Source node (" << src << "). Please try again.\n";
+            continue;
+        }
+
+        // Validate Dijkstra track connectivity immediately
+        const auto testRoute = navigation::RouteNavigator::findRoute(
+            network_, static_cast<NodeId>(src), static_cast<NodeId>(dst));
+        if (!testRoute.success || testRoute.tracks.empty())
+        {
+            std::cout << "  [ERROR] No reachable track path exists from Node " << src << " to Node " << dst << ".\n"
+                      << "          Please choose a different destination node.\n";
+            continue;
+        }
+        break;
+    }
+
+    // Step 3: Train Type validation loop
     TrainType tType = TrainType::Passenger;
-    if (typeInt == 1) tType = TrainType::Express;
-    if (typeInt == 3) tType = TrainType::Freight;
+    while (true)
+    {
+        std::cout << "Select Train Type (1=Express, 2=Passenger, 3=Freight, 0=Cancel) [2] > ";
+        std::string line;
+        if (!std::getline(std::cin, line)) { return; }
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        if (line.empty())
+        {
+            tType = TrainType::Passenger;
+            break;
+        }
+        try
+        {
+            std::size_t idx = 0;
+            int typeInt = std::stoi(line, &idx);
+            if (idx != line.size())
+            {
+                std::cout << "  [ERROR] Invalid characters. Please enter 1, 2, or 3 (or 0 to cancel).\n";
+                continue;
+            }
+            if (typeInt == 0)
+            {
+                std::cout << "  [INFO] Custom dispatch canceled.\n";
+                waitForEnter();
+                return;
+            }
+            if (typeInt == 1) { tType = TrainType::Express; break; }
+            if (typeInt == 2) { tType = TrainType::Passenger; break; }
+            if (typeInt == 3) { tType = TrainType::Freight; break; }
+            std::cout << "  [ERROR] Invalid option " << typeInt << ". Please enter 1 (Express), 2 (Passenger), or 3 (Freight).\n";
+        }
+        catch (...)
+        {
+            std::cout << "  [ERROR] Invalid train type selection. Please enter 1, 2, or 3.\n";
+        }
+    }
 
-    double spd = readDoubleValue("Enter Initial Speed in m/s [20.0] > ", 20.0);
+    // Step 4: Initial Speed validation loop
+    double spd = 20.0;
+    while (true)
+    {
+        std::cout << "Enter Initial Speed in m/s (1.0..45.0, 0=Cancel) [20.0] > ";
+        std::string line;
+        if (!std::getline(std::cin, line)) { return; }
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        if (line.empty())
+        {
+            spd = 20.0;
+            break;
+        }
+        try
+        {
+            std::size_t idx = 0;
+            spd = std::stod(line, &idx);
+            if (idx != line.size())
+            {
+                std::cout << "  [ERROR] Invalid characters in speed. Please enter a numeric value (e.g. 20.0).\n";
+                continue;
+            }
+            if (spd == 0.0)
+            {
+                std::cout << "  [INFO] Custom dispatch canceled.\n";
+                waitForEnter();
+                return;
+            }
+            if (spd < 1.0 || spd > 45.0)
+            {
+                std::cout << "  [ERROR] Speed " << spd << " m/s is out of range. Must be between 1.0 and 45.0 m/s. Please try again.\n";
+                continue;
+            }
+            break;
+        }
+        catch (...)
+        {
+            std::cout << "  [ERROR] Invalid number format for speed. Please try again.\n";
+        }
+    }
 
     auto result = scenario::RouteCatalog::dispatchCustomRoute(
         static_cast<NodeId>(src), static_cast<NodeId>(dst),

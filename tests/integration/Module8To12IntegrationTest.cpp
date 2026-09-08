@@ -200,8 +200,8 @@ TEST(Module8To12IntegrationTest, RouteCatalogDispatchAndAutoResume)
     [[maybe_unused]] const auto baseScenario = mgr.load(ScenarioType::JunctionConflict);
 
     // Verify RouteCatalog can dispatch into this network
-    const auto r1 = RouteCatalog::dispatchCatalogRoute(1, network, manager, 201);
-    const auto r2 = RouteCatalog::dispatchCatalogRoute(2, network, manager, 202);
+    const auto r1 = tcas::scenario::RouteCatalog::dispatchCatalogRoute(1, network, manager, 201);
+    const auto r2 = tcas::scenario::RouteCatalog::dispatchCatalogRoute(2, network, manager, 202);
     ASSERT_TRUE(r1.success);
     ASSERT_TRUE(r2.success);
 

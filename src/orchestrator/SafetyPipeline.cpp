@@ -137,6 +137,11 @@ DistanceMeters distanceToNode(
         }
         if (track->source() == targetNodeId)
         {
+            if (i == startIdx && currentPosition > 25.0)
+            {
+                // The source node is already behind the train's current position on this track
+                return 0.0;
+            }
             return distance;
         }
         const DistanceMeters pos =
@@ -464,15 +469,27 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             yieldCtx->currentTrackId,
             yieldCtx->proxy->position(),
             detected.resourceNodeId);
+
+        if (availDist <= 0.0)
+        {
+            // The junction/node is already behind the yielding train, conflict has cleared
+            continue;
+        }
+
+        // Use a 15m stopping clearance buffer before the fouling point
+        constexpr double kSafetyClearanceBuffer = 15.0;
         const bool brakingFeasible =
             std::isfinite(brakingDist) &&
             brakingDist >= 0.0 &&
-            availDist >= brakingDist + std::max(0.0, top.risk.safetyMargin);
+            availDist >= (brakingDist + kSafetyClearanceBuffer);
+
+        auto riskForResolution = top.risk;
+        riskForResolution.safetyMargin = kSafetyClearanceBuffer;
 
         const safety::ResolutionInput resInput{
             *yieldCtx->proxy,
             detected,
-            top.risk,
+            riskForResolution,
             false,          // yielding train has no priority
             brakingFeasible,
             availDist,

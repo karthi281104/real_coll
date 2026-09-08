@@ -79,6 +79,14 @@ void addResourceEvent(
         return;
     }
 
+    // A train only occupies the track's source node if it is physically located
+    // at the beginning of the track (within 25m clearance zone). Once farther
+    // down the track, it has cleared the source junction and is not occupying it.
+    if (state.position > 25.0)
+    {
+        return;
+    }
+
     const auto* node = network.getNode(track->source());
     if (node != nullptr &&
         (node->type() == infrastructure::NodeType::Junction ||

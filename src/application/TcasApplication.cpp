@@ -509,13 +509,21 @@ void TcasApplication::listFleet()
                   << " --------------------------------------------------------------------\n";
         for (const auto& t : snap.trains)
         {
+            const double effectiveLimit = snap.communicationFailure
+                ? std::min(t.maximumSpeed, 10.0)
+                : t.maximumSpeed;
+            std::string stateStr = trainStateName(t.state);
+            if (t.sensorFailure)
+            {
+                stateStr += " [SENS-FAULT]";
+            }
             std::cout << "  #" << std::setw(4) << std::left << t.id << ' '
                       << std::setw(11) << trainTypeName(t.type) << ' '
                       << std::setw(7) << t.trackId << ' '
                       << std::setw(13) << std::fixed << std::setprecision(1) << t.position << ' '
                       << std::setw(11) << t.velocity << ' '
-                      << std::setw(7) << t.maximumSpeed << ' '
-                      << trainStateName(t.state) << '\n';
+                      << std::setw(7) << effectiveLimit << ' '
+                      << stateStr << '\n';
         }
     }
     printSeparator();
@@ -765,13 +773,21 @@ void TcasApplication::runLiveRadar()
                   << " --------------------------------------------------------------------\n";
         for (const auto& t : snap.trains)
         {
+            const double effectiveLimit = snap.communicationFailure
+                ? std::min(t.maximumSpeed, 10.0)
+                : t.maximumSpeed;
+            std::string stateStr = trainStateName(t.state);
+            if (t.sensorFailure)
+            {
+                stateStr += " [SENS-FAULT]";
+            }
             std::cout << "  #" << std::setw(4) << std::left << t.id << ' '
                       << std::setw(11) << trainTypeName(t.type) << ' '
                       << std::setw(7) << t.trackId << ' '
                       << std::setw(13) << std::fixed << std::setprecision(1) << t.position << ' '
                       << std::setw(11) << t.velocity << ' '
-                      << std::setw(7) << t.maximumSpeed << ' '
-                      << trainStateName(t.state) << '\n';
+                      << std::setw(7) << effectiveLimit << ' '
+                      << stateStr << '\n';
         }
         printSeparator();
 

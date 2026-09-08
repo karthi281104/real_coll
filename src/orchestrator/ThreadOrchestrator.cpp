@@ -401,6 +401,7 @@ void ThreadOrchestrator::processUserCommandsLocked()
                 for (auto tid : trainIds_) { failedSensors_.insert(tid); }
             }
             worldState_.sensorFailure = !failedSensors_.empty();
+            worldState_.operatorMessage = "[FAULT] Sensor uncertainty expanded (+-50m) -> Earlier predictive safety margin.";
             break;
 
         case UserCommandType::RecoverSensor:
@@ -413,16 +414,29 @@ void ThreadOrchestrator::processUserCommandsLocked()
                 failedSensors_.clear();
             }
             worldState_.sensorFailure = !failedSensors_.empty();
+            worldState_.operatorMessage = "[OK] Sensor faults cleared -> Precision tracking restored (1.0m).";
             break;
 
         case UserCommandType::InjectCommFailure:
             userCommFault_.store(true);
             worldState_.communicationFailure = true;
+            worldState_.operatorMessage = "[FAULT] Wireless blackout active -> Fail-safe restricted speed (10 m/s) enforced.";
             break;
 
         case UserCommandType::RecoverComm:
             userCommFault_.store(false);
             worldState_.communicationFailure = commChannelDegraded_.load();
+            for (const auto tid : trainIds_)
+            {
+                if (auto* train = trainManager_.getTrain(tid))
+                {
+                    if (train->state() == TrainState::Running)
+                    {
+                        train->setAcceleration(0.5);
+                    }
+                }
+            }
+            worldState_.operatorMessage = "[OK] Wireless comm link RESTORED -> Line speed restored, trains re-accelerating.";
             break;
 
         case UserCommandType::AddTrain:

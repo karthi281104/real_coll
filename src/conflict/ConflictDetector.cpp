@@ -134,9 +134,17 @@ std::vector<NodeEvent> extractNodeEvents(
             (node->type() == infrastructure::NodeType::Junction ||
              node->type() == infrastructure::NodeType::Platform))
         {
+            const double remDist = std::max(0.0, previousTrack->length() - previous.position);
+            const double speed = std::max(1.0, previous.velocity);
+            const double dt = current.timestamp - previous.timestamp;
+            const double timeOffset = (dt > 0.0)
+                ? std::clamp(remDist / speed, 0.0, dt)
+                : 0.0;
+            const double exactTime = previous.timestamp + timeOffset;
+
             events.push_back({
                 previousTrack->destination(),
-                current.timestamp,
+                exactTime,
                 current.uncertainty
             });
         }

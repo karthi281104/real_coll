@@ -30,6 +30,7 @@ const std::vector<CatalogRouteInfo> kCatalogRoutes = {
         "Heavy Yard Freight (Approach -> Freight Yard)",
         TrainType::Freight,
         6, 7,
+        105, 200.0, 18.0,
         105, 750.0, 20.0,
         "Heavy cargo. Converges across Alpha Junction (Node 2) with R-01 [JUNCTION CONFLICT]."
     },

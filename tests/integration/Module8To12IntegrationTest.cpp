@@ -231,5 +231,118 @@ TEST(Module8To12IntegrationTest, RouteCatalogDispatchAndAutoResume)
     EXPECT_EQ(snap.trains.size(), 2U);
 }
 
+TEST(Module8To12IntegrationTest, Diagnostic100SecondSimulation)
+{
+    using namespace tcas::infrastructure;
+    RailwayNetwork network;
+    train::TrainManager manager;
+
+    network.addNode(Node(1, "Central Station",   NodeType::Station));
+    network.addNode(Node(2, "Alpha Junction",    NodeType::Junction));
+    network.addNode(Node(3, "Beta Junction",     NodeType::Junction));
+    network.addNode(Node(4, "North Terminal",    NodeType::Station));
+    network.addNode(Node(5, "South Harbor",      NodeType::Station));
+    network.addNode(Node(6, "Freight Approach",  NodeType::Generic));
+    network.addNode(Node(7, "Freight Yard",      NodeType::Generic));
+    network.addNode(Node(8, "Platform A",        NodeType::Platform));
+
+    network.addTrack(Track(101, 1, 2, 2000.0, 35.0, 0.000));
+    network.addTrack(Track(102, 2, 3, 1500.0, 30.0, 0.020));
+    network.addTrack(Track(103, 3, 4, 2500.0, 40.0, -0.015));
+    network.addTrack(Track(104, 2, 5, 3000.0, 25.0, 0.010));
+    network.addTrack(Track(105, 6, 2, 2000.0, 25.0, 0.000));
+    network.addTrack(Track(106, 2, 7, 1800.0, 25.0, 0.000));
+    network.addTrack(Track(107, 5, 8,  500.0, 20.0, 0.000));
+    network.addTrack(Track(108, 3, 8,  600.0, 20.0, 0.000));
+
+    auto r1 = scenario::RouteCatalog::dispatchCatalogRoute(1, network, manager, 101);
+    auto r2 = scenario::RouteCatalog::dispatchCatalogRoute(2, network, manager, 102);
+    ASSERT_TRUE(r1.success);
+    ASSERT_TRUE(r2.success);
+
+    std::vector<orchestrator::SafetyPipeline::TrainRoute> routes = {
+        r1.trainRoute,
+        r2.trainRoute
+    };
+
+    orchestrator::SafetyPipeline pipeline(network, manager, routes);
+    auto step = pipeline.makeStep();
+
+    orchestrator::WorldState state;
+    state.simulationTime = 0.0;
+
+    auto* t101 = manager.getTrain(101);
+    auto* t102 = manager.getTrain(102);
+    ASSERT_NE(t101, nullptr);
+    ASSERT_NE(t102, nullptr);
+
+    TrackId curTrack101 = r1.trainRoute.currentTrackId;
+    TrackId curTrack102 = r2.trainRoute.currentTrackId;
+    std::size_t routeIdx101 = 0;
+    std::size_t routeIdx102 = 0;
+
+    const double dt = 0.02;
+    for (int tick = 0; tick < 5000; ++tick) // 100 seconds of simulation
+    {
+        const double simTime = tick * dt;
+        state.simulationTime = simTime;
+
+        // Build snapshot
+        state.trains = {
+            orchestrator::TrainSnapshot(101, t101->type(), curTrack101, t101->mass(), t101->maximumSpeed(),
+                t101->serviceBraking(), t101->emergencyBraking(), t101->state(), t101->position(),
+                t101->velocity(), t101->acceleration(), false, 1.0, routeIdx101),
+            orchestrator::TrainSnapshot(102, t102->type(), curTrack102, t102->mass(), t102->maximumSpeed(),
+                t102->serviceBraking(), t102->emergencyBraking(), t102->state(), t102->position(),
+                t102->velocity(), t102->acceleration(), false, 1.0, routeIdx102)
+        };
+
+        // Run safety step every 50ms (every 2.5 ticks, or tick % 2 == 0)
+        if (tick % 2 == 0)
+        {
+            auto res = step(state);
+            for (const auto& cmd : res.commands)
+            {
+                std::cout << "[SIM t=" << simTime << "s] COMMAND for Train #" << cmd.trainId
+                          << ": type=" << static_cast<int>(cmd.type)
+                          << " (isEmergency=" << cmd.isEmergency() << ")"
+                          << " speed=" << cmd.targetSpeed
+                          << " | T101 pos=" << t101->position() << " on " << curTrack101
+                          << " | T102 pos=" << t102->position() << " on " << curTrack102 << std::endl;
+
+                auto* tr = manager.getTrain(cmd.trainId);
+                if (cmd.type == safety::SafetyCommandType::HoldAtSignal ||
+                    cmd.type == safety::SafetyCommandType::EmergencyBrake)
+                {
+                    tr->setVelocity(0.0);
+                    tr->setAcceleration(0.0);
+                    tr->setState(cmd.isEmergency() ? TrainState::EmergencyBrake : TrainState::Braking);
+                }
+                else if (cmd.type == safety::SafetyCommandType::ReduceSpeed)
+                {
+                    tr->setVelocity(std::min(tr->velocity(), cmd.targetSpeed));
+                }
+            }
+        }
+
+        // Kinematics step
+        for (auto* tr : { t101, t102 })
+        {
+            if (tr->state() != TrainState::Stopped && tr->state() != TrainState::EmergencyBrake && tr->state() != TrainState::Braking)
+            {
+                tr->setPosition(tr->position() + tr->velocity() * dt);
+            }
+        }
+
+        // Boundary checks
+        if (curTrack101 == 101 && t101->position() >= 2000.0) { curTrack101 = 102; t101->setPosition(t101->position() - 2000.0); routeIdx101 = 1; }
+        else if (curTrack101 == 102 && t101->position() >= 1500.0) { curTrack101 = 103; t101->setPosition(t101->position() - 1500.0); routeIdx101 = 2; }
+        else if (curTrack101 == 103 && t101->position() >= 2500.0) { t101->setPosition(2500.0); t101->setVelocity(0.0); t101->setState(TrainState::Stopped); }
+
+        if (curTrack102 == 105 && t102->position() >= 2000.0) { curTrack102 = 106; t102->setPosition(t102->position() - 2000.0); routeIdx102 = 1; }
+        else if (curTrack102 == 106 && t102->position() >= 1800.0) { t102->setPosition(1800.0); t102->setVelocity(0.0); t102->setState(TrainState::Stopped); }
+    }
+}
+
 } // namespace
 } // namespace tcas

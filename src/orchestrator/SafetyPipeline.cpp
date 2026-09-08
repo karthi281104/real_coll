@@ -487,7 +487,6 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         const bool brakingFeasible =
             std::isfinite(brakingDist) &&
             brakingDist >= 0.0 &&
-            availDist >= brakingDist + std::max(0.0, top.risk.safetyMargin);
             availDist >= (brakingDist + kSafetyClearanceBuffer);
 
         auto riskForResolution = top.risk;
@@ -496,7 +495,6 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         const safety::ResolutionInput resInput{
             *yieldCtx->proxy,
             detected,
-            top.risk,
             riskForResolution,
             false,          // yielding train has no priority
             brakingFeasible,

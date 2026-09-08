@@ -547,7 +547,10 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             availDist >= (brakingDist + kSafetyClearanceBuffer);
 
         auto riskForResolution = top.risk;
-        riskForResolution.safetyMargin = kSafetyClearanceBuffer;
+        // Pass the actual safety margin (availDist - brakingDist) to resolution.
+        // The top.risk was computed in Step 4 with the real margin already;
+        // just ensure it's consistent with what we computed here for feasibility.
+        riskForResolution.safetyMargin = availDist - brakingDist;
 
         const safety::ResolutionInput resInput{
             *yieldCtx->proxy,

@@ -50,10 +50,11 @@ enum class TrainState
 {
     Idle,
     Running,
-    Braking,
-    Stopped,
-    EmergencyBrake,
-    Completed
+    Slowing,        ///< ReduceSpeed safety command — service braking to target speed
+    Braking,        ///< Hard service braking — approaching HoldAtSignal
+    Stopped,        ///< HoldAtSignal — stationary at signal
+    EmergencyBrake, ///< True emergency stop — requires operator reset
+    Completed       ///< Train reached end of route
 };
 
 } // namespace tcas

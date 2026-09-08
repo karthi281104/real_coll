@@ -95,40 +95,40 @@ double RiskEngine::calculateTtcRisk(
 {
     if (!std::isfinite(ttc))
     {
-        return 40.0;
+        return 35.0;
     }
 
     if (ttc <= 0.0)
     {
-        return 40.0;
+        return 35.0;  // Collision already occurring
     }
 
-    if (ttc <= 2.0)
+    if (ttc <= 3.0)
     {
-        return 35.0;
+        return 30.0;  // Imminent — less than 3 s
     }
 
-    if (ttc <= 5.0)
+    if (ttc <= 8.0)
     {
-        return 30.0;
+        return 22.0;  // Very close — under 8 s
     }
 
-    if (ttc <= 10.0)
+    if (ttc <= 15.0)
     {
-        return 20.0;
-    }
-
-    if (ttc <= 20.0)
-    {
-        return 10.0;
+        return 15.0;  // Close — under 15 s
     }
 
     if (ttc <= 30.0)
     {
-        return 5.0;
+        return 8.0;   // Moderate — under 30 s
     }
 
-    return 0.0;
+    if (ttc <= 60.0)
+    {
+        return 3.0;   // Early warning — under 60 s
+    }
+
+    return 0.0;  // Well ahead — no TTC contribution
 }
 
 double RiskEngine::calculateRelativeVelocityRisk(

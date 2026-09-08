@@ -69,6 +69,9 @@ const char* trainStateToString(TrainState state)
     case TrainState::Running:
         return "Running";
 
+    case TrainState::Slowing:
+        return "Slowing";
+
     case TrainState::Braking:
         return "Braking";
 

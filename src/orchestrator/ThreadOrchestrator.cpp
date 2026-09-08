@@ -523,31 +523,39 @@ void ThreadOrchestrator::physicsLoop()
             switch (command.type)
             {
             case safety::SafetyCommandType::ReduceSpeed:
+                // Graduate: target speed 50% current — set Slowing (service brake applied)
                 safetySpeedLimits_[command.trainId] = std::min(
                     safetySpeedLimits_.contains(command.trainId)
                         ? safetySpeedLimits_[command.trainId]
                         : train->maximumSpeed(),
                     std::max(0.0, command.targetSpeed));
-                train->setVelocity(std::min(
-                    train->velocity(), safetySpeedLimits_[command.trainId]));
-                train->setAcceleration(std::min(train->acceleration(), 0.0));
-                train->setState(TrainState::Braking);
-                train->setAcceleration(-train->serviceBraking());
+                if (train->state() != TrainState::EmergencyBrake &&
+                    train->state() != TrainState::Stopped &&
+                    train->state() != TrainState::Completed)
+                {
+                    train->setAcceleration(-train->serviceBraking());
+                    train->setState(TrainState::Slowing);
+                }
                 break;
             case safety::SafetyCommandType::HoldAtSignal:
                 safetySpeedLimits_[command.trainId] = 0.0;
-                train->setVelocity(0.0);
-                train->setAcceleration(0.0);
-                train->setState(TrainState::Stopped);
+                if (train->state() != TrainState::EmergencyBrake &&
+                    train->state() != TrainState::Completed)
+                {
+                    train->setAcceleration(-train->serviceBraking());
+                    train->setState(TrainState::Braking);
+                    // Velocity will be zeroed in kinematics once it reaches 0
+                }
                 break;
             case safety::SafetyCommandType::EmergencyBrake:
+                // True emergency — immediate stop, requires operator reset
                 safetySpeedLimits_[command.trainId] = 0.0;
-                train->setVelocity(0.0);
-                train->setAcceleration(0.0);
-                train->setState(command.isEmergency()
-                    ? TrainState::EmergencyBrake
-                    : TrainState::Braking);
-                train->setState(TrainState::EmergencyBrake);
+                if (train->state() != TrainState::Completed)
+                {
+                    train->setVelocity(0.0);
+                    train->setAcceleration(0.0);
+                    train->setState(TrainState::EmergencyBrake);
+                }
                 break;
             case safety::SafetyCommandType::NoAction:
                 break;
@@ -620,11 +628,19 @@ void ThreadOrchestrator::physicsLoop()
                 // Fail-safe restricted speed (10 m/s) under radio blackout
                 safetyLimit = std::min(safetyLimit, 10.0);
             }
-            if (train->state() == TrainState::Stopped ||
-                train->state() == TrainState::EmergencyBrake ||
-                train->state() == TrainState::Completed ||
-                (safetySpeedLimits_.contains(trainId) && safetySpeedLimits_[trainId] <= 0.0))
+            if (train->state() == TrainState::EmergencyBrake ||
+                train->state() == TrainState::Completed)
             {
+                // Terminal states: hold at zero
+                train->setVelocity(0.0);
+                train->setAcceleration(0.0);
+            }
+            else if (train->state() == TrainState::Stopped ||
+                     (safetySpeedLimits_.contains(trainId) && safetySpeedLimits_[trainId] <= 0.0 &&
+                      train->state() != TrainState::Braking &&
+                      train->state() != TrainState::Slowing))
+            {
+                // Held at signal: stay zero
                 train->setVelocity(0.0);
                 train->setAcceleration(0.0);
             }
@@ -637,10 +653,24 @@ void ThreadOrchestrator::physicsLoop()
                     train->maximumSpeed()});
                 train->setVelocity(effectiveSpeed);
 
-                if (train->state() == TrainState::Braking && train->velocity() <= safetyLimit + 0.1)
+                // SLOWING: service braking to target — transition to Running once at limit
+                if (train->state() == TrainState::Slowing)
                 {
-                    train->setAcceleration(0.0);
-                    train->setState(TrainState::Running);
+                    if (train->velocity() <= safetyLimit + 0.1)
+                    {
+                        train->setAcceleration(0.0);
+                        train->setState(TrainState::Running);
+                    }
+                }
+                // BRAKING: approaching HoldAtSignal — transition to Stopped when velocity reaches 0
+                else if (train->state() == TrainState::Braking)
+                {
+                    if (train->velocity() <= 0.1)
+                    {
+                        train->setVelocity(0.0);
+                        train->setAcceleration(0.0);
+                        train->setState(TrainState::Stopped);
+                    }
                 }
             }
         }
@@ -690,16 +720,19 @@ void ThreadOrchestrator::safetyLoop()
                 {
                     commandQueue_.push(command);
                     commandedThisCycle.insert(command.trainId);
+                    // Track ALL safety-restricted trains including EmergencyBrake
                     if (command.type == safety::SafetyCommandType::HoldAtSignal ||
-                        command.type == safety::SafetyCommandType::ReduceSpeed)
+                        command.type == safety::SafetyCommandType::ReduceSpeed ||
+                        command.type == safety::SafetyCommandType::EmergencyBrake)
                     {
                         trainsHeldBySafety_.insert(command.trainId);
                     }
                 }
 
-                // Auto-Resume: If a train was held at a signal/speed reduction but no longer
-                // has active conflicts or commands, resume it. EmergencyBrake is NOT auto-resumed
-                // — it requires explicit operator reset (SetSpeed or ResumeTrain).
+                // Auto-Resume: If a train was held/slowing/braking/emergency but no longer
+                // has active conflicts or commands, step it back toward Running.
+                //   EmergencyBrake → HoldAtSignal (step-down, need one more clear cycle)
+                //   HoldAtSignal / Slowing / Braking → Running (full resume)
                 std::vector<TrainId> toResume;
                 for (const auto tid : trainsHeldBySafety_)
                 {
@@ -723,10 +756,25 @@ void ThreadOrchestrator::safetyLoop()
 
                 for (const auto tid : toResume)
                 {
-                    trainsHeldBySafety_.erase(tid);
-                    safetySpeedLimits_.erase(tid);
-                    if (auto* train = trainManager_.getTrain(tid))
+                    auto* train = trainManager_.getTrain(tid);
+                    if (train == nullptr) { trainsHeldBySafety_.erase(tid); continue; }
+
+                    if (train->state() == TrainState::EmergencyBrake)
                     {
+                        // Step-down: Emergency → HoldAtSignal (stopped, still safety-held)
+                        // Keep in trainsHeldBySafety_ so next clear cycle fully resumes
+                        train->setState(TrainState::Stopped);
+                        train->setVelocity(0.0);
+                        train->setAcceleration(0.0);
+                        safetySpeedLimits_[tid] = 0.0;
+                        worldState_.operatorMessage = "[SAFETY] Emergency resolved for Train #" +
+                            std::to_string(tid) + " → HOLD at signal (one more clear cycle to resume).";
+                    }
+                    else
+                    {
+                        // Full resume: clear safety hold and re-accelerate
+                        trainsHeldBySafety_.erase(tid);
+                        safetySpeedLimits_.erase(tid);
                         train->setState(TrainState::Running);
                         train->setAcceleration(0.5);
                         if (train->velocity() < 1.0)
@@ -736,9 +784,9 @@ void ThreadOrchestrator::safetyLoop()
                                 : std::min(20.0, train->maximumSpeed());
                             train->setVelocity(std::max(train->velocity(), std::min(15.0, targetSpd)));
                         }
+                        worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +
+                            std::to_string(tid) + " \u2192 Signal cleared, re-accelerating.";
                     }
-                    worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +
-                        std::to_string(tid) + " -> Signal cleared, re-accelerating.";
                 }
             }
             catch (const std::exception&)

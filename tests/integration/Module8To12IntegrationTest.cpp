@@ -329,7 +329,7 @@ TEST(Module8To12IntegrationTest, Diagnostic100SecondSimulation)
         // Kinematics step
         for (auto* tr : { t101, t102 })
         {
-            if (tr->state() != TrainState::Stopped && tr->state() != TrainState::EmergencyBrake && tr->state() != TrainState::Braking)
+            if (tr->state() != TrainState::Stopped && tr->state() != TrainState::EmergencyBrake)
             {
                 tr->setPosition(tr->position() + tr->velocity() * dt);
             }

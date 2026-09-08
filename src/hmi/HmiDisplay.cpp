@@ -28,8 +28,9 @@ const char* trainStateName(const TrainState state)
     {
     case TrainState::Idle: return "IDLE";
     case TrainState::Running: return "RUNNING";
+    case TrainState::Slowing: return "SLOWING";
     case TrainState::Braking: return "BRAKING";
-    case TrainState::Stopped: return "STOPPED";
+    case TrainState::Stopped: return "HOLD (SIG)";
     case TrainState::EmergencyBrake: return "EMERGENCY";
     case TrainState::Completed: return "ARRIVED";
     }

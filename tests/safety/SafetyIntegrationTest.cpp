@@ -157,7 +157,11 @@ TEST(
     riskInput.timeToCollision =
         conflicts.front().firstConflictTime;
 
-    riskInput.relativeVelocity = 0.0;
+    // Two trains converging at a junction from perpendicular directions each at
+    // 20 m/s; their combined closing speed component is ~10 m/s (BUG-7 fix:
+    // relativeVelocity must be non-zero here to push the risk score above 30.0
+    // into Medium, matching the physical reality of a junction conflict).
+    riskInput.relativeVelocity = 10.0;
 
     riskInput.brakingDistance = 100.0;
 

@@ -204,7 +204,9 @@ void ThreadOrchestrator::removeTrain(TrainId trainId)
         failedSensors_.erase(trainId);
         operatorSpeedLimits_.erase(trainId);
         safetySpeedLimits_.erase(trainId);
+        dispatchSpeeds_.erase(trainId);
         trainsHeldBySafety_.erase(trainId);
+        emergencyBrakeSet_.erase(trainId);
         trainManager_.removeTrain(trainId);
         updateWorldSnapshotLocked();
     }
@@ -231,6 +233,18 @@ void ThreadOrchestrator::setTrainRoute(
         }
     }
     navStates_[trainId] = std::move(nav);
+
+    // BUG-1 fix: record the train's current velocity as its dispatch speed so
+    // auto-resume always restores the correct catalog-assigned speed.
+    if (!dispatchSpeeds_.contains(trainId))
+    {
+        const auto* train = trainManager_.getTrain(trainId);
+        if (train != nullptr && train->velocity() > 0.0)
+        {
+            dispatchSpeeds_[trainId] = train->velocity();
+        }
+    }
+
     updateWorldSnapshotLocked();
 }
 
@@ -355,8 +369,10 @@ void ThreadOrchestrator::processUserCommandsLocked()
             {
                 const double targetSpd = std::clamp(cmd.numericValue, 0.0, train->maximumSpeed());
                 operatorSpeedLimits_[cmd.trainId] = targetSpd;
+                dispatchSpeeds_[cmd.trainId] = targetSpd; // BUG-1: track dispatch speed
                 safetySpeedLimits_.erase(cmd.trainId);
                 trainsHeldBySafety_.erase(cmd.trainId);
+                emergencyBrakeSet_.erase(cmd.trainId);    // operator reset clears E-brake
                 train->setState(TrainState::Running);
                 train->setVelocity(targetSpd);
                 train->setAcceleration(0.5);
@@ -382,8 +398,10 @@ void ThreadOrchestrator::processUserCommandsLocked()
                     ? std::min(cmd.numericValue, train->maximumSpeed())
                     : std::min(20.0, train->maximumSpeed());
                 operatorSpeedLimits_[cmd.trainId] = targetSpd;
+                dispatchSpeeds_[cmd.trainId] = targetSpd; // BUG-1: track dispatch speed
                 safetySpeedLimits_.erase(cmd.trainId);
                 trainsHeldBySafety_.erase(cmd.trainId);
+                emergencyBrakeSet_.erase(cmd.trainId);    // operator reset clears E-brake
                 train->setState(TrainState::Running);
                 train->setVelocity(targetSpd);
                 train->setAcceleration(0.5);
@@ -452,7 +470,9 @@ void ThreadOrchestrator::processUserCommandsLocked()
             failedSensors_.erase(cmd.trainId);
             operatorSpeedLimits_.erase(cmd.trainId);
             safetySpeedLimits_.erase(cmd.trainId);
+            dispatchSpeeds_.erase(cmd.trainId);
             trainsHeldBySafety_.erase(cmd.trainId);
+            emergencyBrakeSet_.erase(cmd.trainId);
             trainManager_.removeTrain(cmd.trainId); // Safe: always done under worldMutex_
             break;
 
@@ -548,13 +568,17 @@ void ThreadOrchestrator::physicsLoop()
                 }
                 break;
             case safety::SafetyCommandType::EmergencyBrake:
-                // True emergency — immediate stop, requires operator reset
+                // LOGIC-4 fix: EmergencyBrake is sticky — requires explicit
+                // operator reset (SetSpeed or ResumeTrain command) before the
+                // train may move again.  It is tracked in emergencyBrakeSet_
+                // and is NOT auto-resumed by the safety loop.
                 safetySpeedLimits_[command.trainId] = 0.0;
                 if (train->state() != TrainState::Completed)
                 {
                     train->setVelocity(0.0);
                     train->setAcceleration(0.0);
                     train->setState(TrainState::EmergencyBrake);
+                    emergencyBrakeSet_.insert(command.trainId);
                 }
                 break;
             case safety::SafetyCommandType::NoAction:
@@ -595,10 +619,11 @@ void ThreadOrchestrator::physicsLoop()
                         }
                         else
                         {
+                            // BUG-3 fix: remove the redundant setState(Stopped)
+                            // that was immediately overwritten by setState(Completed).
                             train->setPosition(curTrack->length());
                             train->setVelocity(0.0);
                             train->setAcceleration(0.0);
-                            train->setState(TrainState::Stopped);
                             train->setState(TrainState::Completed);
                         }
                     }
@@ -729,13 +754,27 @@ void ThreadOrchestrator::safetyLoop()
                     }
                 }
 
-                // Auto-Resume: If a train was held/slowing/braking/emergency but no longer
-                // has active conflicts or commands, step it back toward Running.
-                //   EmergencyBrake → HoldAtSignal (step-down, need one more clear cycle)
-                //   HoldAtSignal / Slowing / Braking → Running (full resume)
+                // Auto-Resume: If a train was held/slowing but no longer
+                // has active conflicts or commands that cycle, step it back
+                // toward Running.
+                //
+                // EmergencyBrake trains are in emergencyBrakeSet_ and are
+                // NEVER auto-resumed here — they require an operator command.
+                //
+                // BUG-4 fix: only resume if the train is truly stopped
+                // (Stopped or Slowing).  A train still in Braking has not yet
+                // physically halted; resuming it creates a race where
+                // safetySpeedLimits_ are cleared while the physics loop is
+                // still decelerating the train.
                 std::vector<TrainId> toResume;
                 for (const auto tid : trainsHeldBySafety_)
                 {
+                    // Skip trains that require operator reset
+                    if (emergencyBrakeSet_.contains(tid))
+                    {
+                        continue;
+                    }
+
                     if (!commandedThisCycle.contains(tid))
                     {
                         bool inConflict = false;
@@ -747,9 +786,43 @@ void ThreadOrchestrator::safetyLoop()
                                 break;
                             }
                         }
+
+                        // LOGIC-2 fix: if the only active conflicts involving
+                        // this train are with OTHER stopped trains (deadlock),
+                        // allow resume so both sides can clear the junction.
+                        if (inConflict)
+                        {
+                            bool onlyStoppedPartners = true;
+                            for (const auto& c : result.activeConflicts)
+                            {
+                                if (c.trainA == tid || c.trainB == tid)
+                                {
+                                    const TrainId partner = (c.trainA == tid) ? c.trainB : c.trainA;
+                                    const auto* partnerTrain = trainManager_.getTrain(partner);
+                                    if (partnerTrain == nullptr ||
+                                        (partnerTrain->state() != TrainState::Stopped &&
+                                         partnerTrain->state() != TrainState::EmergencyBrake))
+                                    {
+                                        onlyStoppedPartners = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (onlyStoppedPartners)
+                            {
+                                inConflict = false; // treat as clear (deadlock break)
+                            }
+                        }
+
                         if (!inConflict)
                         {
-                            toResume.push_back(tid);
+                            // BUG-4 fix: only resume once the train has fully stopped
+                            auto* t = trainManager_.getTrain(tid);
+                            if (t != nullptr &&
+                                t->state() != TrainState::Braking)
+                            {
+                                toResume.push_back(tid);
+                            }
                         }
                     }
                 }
@@ -759,34 +832,25 @@ void ThreadOrchestrator::safetyLoop()
                     auto* train = trainManager_.getTrain(tid);
                     if (train == nullptr) { trainsHeldBySafety_.erase(tid); continue; }
 
-                    if (train->state() == TrainState::EmergencyBrake)
+                    // Full resume: clear safety hold and re-accelerate.
+                    // BUG-1 fix: restore to the stored dispatch speed, not a
+                    // hardcoded 15 m/s constant.
+                    trainsHeldBySafety_.erase(tid);
+                    safetySpeedLimits_.erase(tid);
+                    train->setState(TrainState::Running);
+                    train->setAcceleration(0.5);
+                    if (train->velocity() < 1.0)
                     {
-                        // Step-down: Emergency → HoldAtSignal (stopped, still safety-held)
-                        // Keep in trainsHeldBySafety_ so next clear cycle fully resumes
-                        train->setState(TrainState::Stopped);
-                        train->setVelocity(0.0);
-                        train->setAcceleration(0.0);
-                        safetySpeedLimits_[tid] = 0.0;
-                        worldState_.operatorMessage = "[SAFETY] Emergency resolved for Train #" +
-                            std::to_string(tid) + " → HOLD at signal (one more clear cycle to resume).";
-                    }
-                    else
-                    {
-                        // Full resume: clear safety hold and re-accelerate
-                        trainsHeldBySafety_.erase(tid);
-                        safetySpeedLimits_.erase(tid);
-                        train->setState(TrainState::Running);
-                        train->setAcceleration(0.5);
-                        if (train->velocity() < 1.0)
-                        {
-                            const double targetSpd = operatorSpeedLimits_.contains(tid)
+                        const double dispatchSpd = dispatchSpeeds_.contains(tid)
+                            ? dispatchSpeeds_[tid]
+                            : (operatorSpeedLimits_.contains(tid)
                                 ? operatorSpeedLimits_[tid]
-                                : std::min(20.0, train->maximumSpeed());
-                            train->setVelocity(std::max(train->velocity(), std::min(15.0, targetSpd)));
-                        }
-                        worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +
-                            std::to_string(tid) + " \u2192 Signal cleared, re-accelerating.";
+                                : std::min(20.0, train->maximumSpeed()));
+                        train->setVelocity(std::max(train->velocity(),
+                            std::min(dispatchSpd, train->maximumSpeed())));
                     }
+                    worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +
+                        std::to_string(tid) + " -> Signal cleared, re-accelerating.";
                 }
             }
             catch (const std::exception&)
@@ -826,7 +890,15 @@ void ThreadOrchestrator::communicationLoop()
             const auto sent = communicationChannel_.totalSent() - sentBefore;
             const auto delivered = communicationChannel_.totalDelivered() - deliveredBefore;
             const auto dropped = communicationChannel_.totalDropped() - droppedBefore;
-            const bool degraded = (sent > 0U && dropped > delivered);
+
+            // LOGIC-7 fix: use hysteresis so that a single zero-packet cycle
+            // does not clear the degradation flag.
+            // Degraded = more dropped than delivered in this cycle.
+            // Only clear once a non-trivial good cycle is observed.
+            bool degradedThisCycle = (sent > 0U && dropped > delivered);
+            bool degraded = degradedThisCycle || (commDegradedPrev_ && sent == 0U);
+            commDegradedPrev_ = degraded;
+
             commChannelDegraded_.store(degraded);
             worldState_.communicationFailure = userCommFault_.load() || degraded;
         }

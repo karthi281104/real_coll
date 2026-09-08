@@ -109,7 +109,9 @@ std::unique_ptr<train::Train> buildTrainProxy(
 }
 
 // Find the distance from the train's current position to a target node along
-// its assigned route. Returns 0.0 if not found.
+// its assigned route.
+// Returns -1.0 (sentinel) when currentTrackId is not present in the route,
+// so callers can distinguish "not found" from "distance is zero / node reached".
 DistanceMeters distanceToNode(
     const infrastructure::RailwayNetwork& network,
     const navigation::RouteResult& route,
@@ -121,7 +123,7 @@ DistanceMeters distanceToNode(
         route.tracks.begin(), route.tracks.end(), currentTrackId);
     if (it == route.tracks.end())
     {
-        return 0.0;
+        return -1.0; // BUG-5 fix: sentinel — track not in route
     }
 
     const std::size_t startIdx = static_cast<std::size_t>(
@@ -360,10 +362,15 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         // Determine the yielding train (lower priority)
         const auto prioA = priorityEngine.assess(*ctxA->proxy);
         const auto prioB = priorityEngine.assess(*ctxB->proxy);
+        // LOGIC-1 fix: when types are equal, the train with higher approach
+        // velocity is harder to stop and therefore gets priority.
+        // Tiebreak on lower ID only when velocities are also equal.
         const bool aHasPriority =
             prioA.higherThan(prioB) ||
             (prioA.priority == prioB.priority &&
-             ctxA->proxy->id() < ctxB->proxy->id());
+             (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
+              (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
+               ctxA->proxy->id() < ctxB->proxy->id())));
 
         const TrainContext* yieldCtx = aHasPriority ? ctxB : ctxA;
 
@@ -385,9 +392,14 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
                 yieldCtx->currentTrackId,
                 yieldCtx->proxy->position(),
                 detected.resourceNodeId);
-            if (availDist <= 0.0)
+            if (availDist < 0.0)
             {
-                // Node is already behind the yielding train, conflict has already been passed
+                // BUG-5 fix: -1.0 sentinel means track not in route — skip
+                continue;
+            }
+        if (availDist == 0.0)
+            {
+                // Conflict node is exactly at current position — already passed
                 continue;
             }
         }
@@ -451,10 +463,13 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
 
         const auto prioA = priorityEngine.assess(*ctxA->proxy);
         const auto prioB = priorityEngine.assess(*ctxB->proxy);
+        // LOGIC-1 fix: same tiebreaker as Step 4
         const bool aHasPriority =
             prioA.higherThan(prioB) ||
             (prioA.priority == prioB.priority &&
-             ctxA->proxy->id() < ctxB->proxy->id());
+             (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
+              (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
+               ctxA->proxy->id() < ctxB->proxy->id())));
 
         const TrainContext* prioCtx  = aHasPriority ? ctxA : ctxB;
         const TrainContext* yieldCtx = aHasPriority ? ctxB : ctxA;
@@ -478,11 +493,17 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
 
         if (detected.resourceNodeId != 0)
         {
+            // LOGIC-6 fix: cap reservation window to 30 s from now to avoid
+            // locking a junction for up to 125 s based on distant horizons.
+            constexpr double kMaxReservationLookahead = 30.0;
+            const double reserveStart = currentTime + std::min(detected.firstConflictTime, kMaxReservationLookahead);
+            const double reserveEnd   = currentTime + std::min(detected.lastConflictTime,  kMaxReservationLookahead);
+
             const bool reserved = reservations_.request(
                 prioCtx->proxy->id(),
                 zone,
-                currentTime + detected.firstConflictTime,
-                currentTime + detected.lastConflictTime);
+                reserveStart,
+                reserveEnd);
 
             if (!reserved)
             {
@@ -518,9 +539,14 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
                 yieldCtx->currentTrackId,
                 yieldCtx->proxy->position(),
                 detected.resourceNodeId);
-            if (availDist <= 0.0)
+            if (availDist < 0.0)
             {
-                // The junction/node is already behind the yielding train, conflict has cleared
+                // BUG-5 fix: -1.0 sentinel — track not in route, skip
+                continue;
+            }
+            if (availDist == 0.0)
+            {
+                // Conflict node exactly at current position — already passed
                 continue;
             }
         }
@@ -535,7 +561,24 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             }
             else
             {
-                availDist = std::max(15.0, otherCtx->proxy->position() - yieldCtx->proxy->position());
+                // LOGIC-5 fix: position subtraction is only meaningful if both
+                // trains are on the same track.  When they are on different
+                // tracks estimate the gap as (yield remaining on its track) +
+                // (lead position on its track).
+                if (yieldCtx->currentTrackId == otherCtx->currentTrackId)
+                {
+                    availDist = std::max(15.0,
+                        otherCtx->proxy->position() - yieldCtx->proxy->position());
+                }
+                else
+                {
+                    const auto* yTrk = network_.getTrack(yieldCtx->currentTrackId);
+                    const double yRemaining = (yTrk != nullptr)
+                        ? std::max(0.0, yTrk->length() - yieldCtx->proxy->position())
+                        : 0.0;
+                    availDist = std::max(15.0,
+                        yRemaining + otherCtx->proxy->position());
+                }
             }
         }
 

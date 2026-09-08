@@ -129,10 +129,18 @@ private:
     std::unordered_map<TrainId, TrainNavigationState> navStates_;
     std::unordered_map<TrainId, SpeedMetersPerSecond> operatorSpeedLimits_;
     std::unordered_map<TrainId, SpeedMetersPerSecond> safetySpeedLimits_;
+    /// Stores the dispatch/scheduled speed for each train so auto-resume can
+    /// restore the correct speed rather than using a hardcoded constant.
+    std::unordered_map<TrainId, SpeedMetersPerSecond> dispatchSpeeds_;
     std::unordered_set<TrainId> failedSensors_;
     std::unordered_set<TrainId> trainsHeldBySafety_;
+    /// Trains in EmergencyBrake state require explicit operator reset before
+    /// they may move again — they are NOT auto-resumed by the safety loop.
+    std::unordered_set<TrainId> emergencyBrakeSet_;
     std::atomic<bool> userCommFault_{ false };
     std::atomic<bool> commChannelDegraded_{ false };
+    /// Previous-cycle degradation state for hysteresis (LOGIC-7 fix).
+    bool commDegradedPrev_{ false };
     std::atomic<bool> safetyFailure_{ false };
 
     mutable std::mutex safetyStepMutex_;

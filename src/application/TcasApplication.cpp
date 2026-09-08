@@ -7,7 +7,6 @@
 #include "train/PassengerTrain.hpp"
 
 #include <chrono>
-#include <cctype>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -30,75 +29,127 @@ namespace tcas::app
 namespace
 {
 
-void printSeparator()
+const char* trainTypeName(TrainType t) noexcept
 {
-    std::cout << "==============================================================\n";
+    switch (t)
+    {
+    case TrainType::Express:   return "Express";
+    case TrainType::Passenger: return "Passenger";
+    case TrainType::Freight:   return "Freight";
+    }
+    return "Unknown";
 }
 
-int readInt()
+const char* trainStateName(TrainState s) noexcept
 {
-    int value = 0;
-    std::string line;
-    if (!std::getline(std::cin, line))
+    switch (s)
     {
-        return -1;
+    case TrainState::Idle:           return "IDLE";
+    case TrainState::Running:        return "RUNNING";
+    case TrainState::Braking:        return "BRAKING";
+    case TrainState::Stopped:        return "STOPPED";
+    case TrainState::EmergencyBrake: return "EMERGENCY";
     }
-    if (line.size() == 1U)
+    return "UNKNOWN";
+}
+
+const char* conflictTypeName(conflict::ConflictType t) noexcept
+{
+    switch (t)
     {
-        switch (static_cast<char>(std::toupper(static_cast<unsigned char>(line[0]))))
-        {
-        case 'P': return 2;
-        case 'R': return 3;
-        case 'S': return 6;
-        case 'H': return 8;
-        case 'F': return 10;
-        case 'Q': return 19;
-        default: break;
-        }
+    case conflict::ConflictType::RearEnd:  return "REAR-END";
+    case conflict::ConflictType::HeadOn:   return "HEAD-ON";
+    case conflict::ConflictType::Junction: return "JUNCTION";
+    case conflict::ConflictType::Platform: return "PLATFORM";
+    }
+    return "UNKNOWN";
+}
+
+const char* commandName(safety::SafetyCommandType t) noexcept
+{
+    switch (t)
+    {
+    case safety::SafetyCommandType::NoAction:       return "NO ACTION";
+    case safety::SafetyCommandType::ReduceSpeed:    return "REDUCE SPEED";
+    case safety::SafetyCommandType::HoldAtSignal:   return "HOLD AT SIGNAL";
+    case safety::SafetyCommandType::EmergencyBrake: return "EMERGENCY BRAKE";
+    }
+    return "UNKNOWN";
+}
+
+void waitForEnter()
+{
+    std::cout << "\n[Press ENTER to return to menu] > ";
+    std::string dummy;
+    std::getline(std::cin, dummy);
+}
+
+int readInteger(const std::string& prompt, int defaultValue = 0)
+{
+    std::cout << prompt;
+    std::string line;
+    if (!std::getline(std::cin, line) || line.empty())
+    {
+        return defaultValue;
     }
     try
     {
-        value = std::stoi(line);
+        return std::stoi(line);
     }
     catch (...)
     {
-        return -1;
+        return defaultValue;
     }
-    return value;
 }
 
-double readDouble(const char* prompt)
+double readDoubleValue(const std::string& prompt, double defaultValue = 0.0)
 {
     std::cout << prompt;
-    double value = 0.0;
     std::string line;
-    if (!std::getline(std::cin, line))
+    if (!std::getline(std::cin, line) || line.empty())
     {
-        return 0.0;
+        return defaultValue;
     }
     try
     {
-        value = std::stod(line);
+        return std::stod(line);
     }
     catch (...)
     {
-        return 0.0;
+        return defaultValue;
     }
-    return value;
-}
-
-TrainId readTrainId(const char* prompt)
-{
-    std::cout << prompt;
-    return static_cast<TrainId>(readInt());
 }
 
 } // namespace
 
 TcasApplication::TcasApplication()
 {
-    // Pre-load default Junction conflict scenario for immediate readiness
-    loadScenario(scenario::ScenarioType::JunctionConflict);
+    buildNetwork();
+    startSimulation();
+
+    auto r1 = scenario::RouteCatalog::dispatchCatalogRoute(1, network_, trainManager_);
+    if (r1.success)
+    {
+        currentRoutes_.push_back(r1.trainRoute);
+        if (pipeline_) { pipeline_->addOrUpdateRoute(r1.trainRoute); }
+        if (orchestrator_)
+        {
+            orchestrator_->addTrain(r1.trainId);
+            orchestrator_->setTrainRoute(r1.trainId, r1.trainRoute.currentTrackId, r1.trainRoute.route);
+        }
+    }
+
+    auto r2 = scenario::RouteCatalog::dispatchCatalogRoute(2, network_, trainManager_);
+    if (r2.success)
+    {
+        currentRoutes_.push_back(r2.trainRoute);
+        if (pipeline_) { pipeline_->addOrUpdateRoute(r2.trainRoute); }
+        if (orchestrator_)
+        {
+            orchestrator_->addTrain(r2.trainId);
+            orchestrator_->setTrainRoute(r2.trainId, r2.trainRoute.currentTrackId, r2.trainRoute.route);
+        }
+    }
 }
 
 TcasApplication::~TcasApplication()
@@ -109,10 +160,35 @@ TcasApplication::~TcasApplication()
     }
 }
 
+void TcasApplication::buildNetwork()
+{
+    using namespace tcas::infrastructure;
+    network_ = RailwayNetwork{};
+    trainManager_.clear();
+    currentRoutes_.clear();
+
+    network_.addNode(Node(1, "Central Station",   NodeType::Station));
+    network_.addNode(Node(2, "Alpha Junction",    NodeType::Junction));
+    network_.addNode(Node(3, "Beta Junction",     NodeType::Junction));
+    network_.addNode(Node(4, "North Terminal",    NodeType::Station));
+    network_.addNode(Node(5, "South Harbor",      NodeType::Station));
+    network_.addNode(Node(6, "Freight Approach",  NodeType::Generic));
+    network_.addNode(Node(7, "Freight Yard",      NodeType::Generic));
+    network_.addNode(Node(8, "Platform A",        NodeType::Platform));
+
+    network_.addTrack(Track(101, 1, 2, 2000.0, 35.0, 0.000));
+    network_.addTrack(Track(102, 2, 3, 1500.0, 30.0, 0.020));
+    network_.addTrack(Track(103, 3, 4, 2500.0, 40.0, -0.015));
+    network_.addTrack(Track(104, 2, 5, 3000.0, 25.0, 0.010));
+    network_.addTrack(Track(105, 6, 2, 2000.0, 25.0, 0.000));
+    network_.addTrack(Track(106, 2, 7, 1800.0, 25.0, 0.000));
+    network_.addTrack(Track(107, 5, 8,  500.0, 20.0, 0.000));
+    network_.addTrack(Track(108, 3, 8,  600.0, 20.0, 0.000));
+}
+
 int TcasApplication::run()
 {
 #ifdef _WIN32
-    // Enable ANSI Virtual Terminal Processing on Windows console
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hOut != INVALID_HANDLE_VALUE)
     {
@@ -124,14 +200,61 @@ int TcasApplication::run()
     }
 #endif
 
-    startSimulation();
-
-    // Start dedicated Input Thread -> UserCommandQueue
-    inputThread_ = std::thread(&TcasApplication::inputLoop, this);
-
-    if (inputThread_.joinable())
+    std::string inputLine;
+    while (!shutdown_)
     {
-        inputThread_.join();
+        switch (currentMenu_)
+        {
+        case MenuState::MainMenu:
+            printMainMenu();
+            break;
+        case MenuState::FleetMenu:
+            printFleetMenu();
+            break;
+        case MenuState::SafetyMenu:
+            printSafetyMenu();
+            break;
+        case MenuState::FaultMenu:
+            printFaultMenu();
+            break;
+        case MenuState::SimControlMenu:
+            printSimControlMenu();
+            break;
+        }
+
+        std::cout << "Select option > ";
+        if (!std::getline(std::cin, inputLine))
+        {
+            break;
+        }
+
+        while (!inputLine.empty() && std::isspace(static_cast<unsigned char>(inputLine.front())))
+        {
+            inputLine.erase(inputLine.begin());
+        }
+        while (!inputLine.empty() && std::isspace(static_cast<unsigned char>(inputLine.back())))
+        {
+            inputLine.pop_back();
+        }
+
+        switch (currentMenu_)
+        {
+        case MenuState::MainMenu:
+            handleMainMenuInput(inputLine);
+            break;
+        case MenuState::FleetMenu:
+            handleFleetMenuInput(inputLine);
+            break;
+        case MenuState::SafetyMenu:
+            handleSafetyMenuInput(inputLine);
+            break;
+        case MenuState::FaultMenu:
+            handleFaultMenuInput(inputLine);
+            break;
+        case MenuState::SimControlMenu:
+            handleSimControlMenuInput(inputLine);
+            break;
+        }
     }
 
     if (orchestrator_)
@@ -139,569 +262,613 @@ int TcasApplication::run()
         orchestrator_->stop();
         orchestrator_.reset();
     }
-    std::cout << "\033[2J\033[H[OK] TCAS Application shut down cleanly. Goodbye.\n";
+    std::cout << "\n[OK] TCAS Application shut down cleanly. Goodbye.\n";
     return 0;
 }
 
-void TcasApplication::inputLoop()
+void TcasApplication::printSeparator() const
 {
-    std::string line;
-    while (!shutdown_ && std::getline(std::cin, line))
-    {
-        processLine(line);
-    }
-}
-
-void TcasApplication::processLine(const std::string& rawLine)
-{
-    std::string line = rawLine;
-    while (!line.empty() && std::isspace(static_cast<unsigned char>(line.front())))
-    {
-        line.erase(line.begin());
-    }
-    while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back())))
-    {
-        line.pop_back();
-    }
-    if (line.empty())
-    {
-        return;
-    }
-
-    std::istringstream iss(line);
-    std::string firstToken;
-    iss >> firstToken;
-
-    std::string firstLower = firstToken;
-    for (char& c : firstLower) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
-
-    int cmdNum = -1;
-    try
-    {
-        cmdNum = std::stoi(firstToken);
-    }
-    catch (...)
-    {
-        cmdNum = -1;
-    }
-
-    // 1. Start simulation
-    if (firstLower == "1" || firstLower == "start")
-    {
-        startSimulation();
-        return;
-    }
-
-    // 2. Pause simulation
-    if (firstLower == "2" || firstLower == "p" || firstLower == "pause")
-    {
-        pauseSimulation();
-        return;
-    }
-
-    // 3. Resume simulation
-    if (firstLower == "3" || firstLower == "r" || firstLower == "resume")
-    {
-        resumeSimulation();
-        return;
-    }
-
-    // 4. Add Train: 4 [id] [type: 1=Exp, 2=Pass, 3=Frt] [speed]
-    if (firstLower == "4" || firstLower == "add")
-    {
-        TrainId newId = 0;
-        int typeInt = 1;
-        double speed = 20.0;
-        if (iss >> newId)
-        {
-            if (iss >> typeInt)
-            {
-                iss >> speed;
-            }
-        }
-        if (newId == 0)
-        {
-            newId = 101;
-            while (trainManager_.getTrain(newId) != nullptr)
-            {
-                ++newId;
-            }
-        }
-
-        std::unique_ptr<train::Train> train;
-        if (typeInt == 2)
-        {
-            train = std::make_unique<train::PassengerTrain>(newId, 60000.0, 33.3, 0.8, 1.2);
-        }
-        else if (typeInt == 3)
-        {
-            train = std::make_unique<train::FreightTrain>(newId, 120000.0, 22.2, 0.5, 0.8);
-        }
-        else
-        {
-            train = std::make_unique<train::ExpressTrain>(newId, 45000.0, 45.0, 0.9, 1.4);
-        }
-        train->setPosition(0.0);
-        train->setVelocity(speed);
-
-        TrackId startTrack = (!currentRoutes_.empty()) ? currentRoutes_.front().currentTrackId : 101;
-        navigation::RouteResult route;
-        route.success = true;
-        route.tracks = { startTrack };
-        route.totalDistance = network_.getTrack(startTrack) ? network_.getTrack(startTrack)->length() : 2000.0;
-
-        if (trainManager_.addTrain(std::move(train)))
-        {
-            orchestrator::SafetyPipeline::TrainRoute tr{ newId, startTrack, route };
-            currentRoutes_.push_back(tr);
-            if (pipeline_) { pipeline_->addOrUpdateRoute(tr); }
-            if (orchestrator_)
-            {
-                orchestrator_->setTrainRoute(newId, startTrack, route);
-                orchestrator_->postCommand({orchestrator::UserCommandType::AddTrain, newId});
-                orchestrator_->setOperatorMessage("[OK] Train #" + std::to_string(newId) + " ADDED to simulation (speed=" + std::to_string(static_cast<int>(speed)) + " m/s).");
-            }
-        }
-        else
-        {
-            if (orchestrator_)
-            {
-                orchestrator_->setOperatorMessage("[ERR] Train #" + std::to_string(newId) + " already exists.");
-            }
-        }
-        return;
-    }
-
-    // 5. Remove Train: 5 [id]
-    if (firstLower == "5" || firstLower == "remove")
-    {
-        TrainId remId = 0;
-        if (!(iss >> remId))
-        {
-            if (!currentRoutes_.empty())
-            {
-                remId = currentRoutes_.back().trainId;
-            }
-        }
-        if (remId != 0 && trainManager_.removeTrain(remId))
-        {
-            if (orchestrator_)
-            {
-                orchestrator_->postCommand({orchestrator::UserCommandType::RemoveTrain, remId});
-                orchestrator_->setOperatorMessage("[OK] Train #" + std::to_string(remId) + " REMOVED from simulation.");
-            }
-            if (pipeline_) { pipeline_->removeRoute(remId); }
-            std::erase_if(currentRoutes_, [remId](const auto& r) { return r.trainId == remId; });
-        }
-        else
-        {
-            if (orchestrator_)
-            {
-                orchestrator_->setOperatorMessage("[ERR] Train #" + std::to_string(remId) + " not found.");
-            }
-        }
-        return;
-    }
-
-    // 6. Set Speed: 6 [id] [speed] or s [id] [speed] or s [speed]
-    if (firstLower == "6" || firstLower == "s" || firstLower == "speed")
-    {
-        double a = 0.0, b = 0.0;
-        TrainId tid = 0;
-        double speed = 0.0;
-        if (iss >> a)
-        {
-            if (iss >> b) { tid = static_cast<TrainId>(a); speed = b; }
-            else { tid = currentRoutes_.empty() ? 101 : currentRoutes_.front().trainId; speed = a; }
-        }
-        else
-        {
-            tid = currentRoutes_.empty() ? 101 : currentRoutes_.front().trainId;
-            speed = 25.0;
-        }
-        if (orchestrator_)
-        {
-            orchestrator_->postCommand({orchestrator::UserCommandType::SetSpeed, tid, speed});
-            orchestrator_->setOperatorMessage("[OK] Speed command posted for Train #" + std::to_string(tid) + " -> " + std::to_string(static_cast<int>(speed)) + " m/s");
-        }
-        return;
-    }
-
-    // 7. Change Route
-    if (firstLower == "7" || firstLower == "route")
-    {
-        if (orchestrator_)
-        {
-            orchestrator_->setOperatorMessage("[OK] Alternate route assigned for Train #" + std::to_string(currentRoutes_.empty() ? 1 : currentRoutes_.front().trainId));
-        }
-        return;
-    }
-
-    // 8. Hold Train: 8 [id] or h [id] or hold
-    if (firstLower == "8" || firstLower == "h" || firstLower == "hold")
-    {
-        TrainId tid = 0;
-        if (!(iss >> tid))
-        {
-            if (!currentRoutes_.empty()) { tid = currentRoutes_.front().trainId; }
-        }
-        if (tid != 0 && orchestrator_)
-        {
-            orchestrator_->postCommand({orchestrator::UserCommandType::HoldTrain, tid});
-            orchestrator_->setOperatorMessage("[OK] Train #" + std::to_string(tid) + " HELD at signal.");
-        }
-        return;
-    }
-
-    // 9. Resume Train: 9 [id]
-    if (firstLower == "9")
-    {
-        TrainId tid = 0;
-        if (!(iss >> tid))
-        {
-            if (!currentRoutes_.empty()) { tid = currentRoutes_.front().trainId; }
-        }
-        if (tid != 0 && orchestrator_)
-        {
-            orchestrator_->postCommand({orchestrator::UserCommandType::ResumeTrain, tid, 20.0});
-            orchestrator_->setOperatorMessage("[OK] Train #" + std::to_string(tid) + " RESUMED.");
-        }
-        return;
-    }
-
-    // 10 & 11. Sensor Fault / Recovery
-    if (cmdNum == 10 || cmdNum == 11 || firstLower == "f" || firstLower == "fault")
-    {
-        if (orchestrator_)
-        {
-            const bool fault = (cmdNum == 11) ? false : ((cmdNum == 10) ? true : !orchestrator_->snapshot().sensorFailure);
-            orchestrator_->postCommand({
-                fault ? orchestrator::UserCommandType::InjectSensorFailure : orchestrator::UserCommandType::RecoverSensor
-            });
-            orchestrator_->setSensorFault(fault);
-            orchestrator_->setOperatorMessage(fault
-                ? "[FAULT] Sensor failure injected! Uncertainty increased."
-                : "[OK] Sensor fault cleared. Tracking nominal.");
-        }
-        return;
-    }
-
-    // 12 & 13. Comm Fault / Recovery
-    if (cmdNum == 12 || cmdNum == 13 || firstLower == "c" || firstLower == "comm")
-    {
-        if (orchestrator_)
-        {
-            const bool fault = (cmdNum == 13) ? false : ((cmdNum == 12) ? true : !orchestrator_->snapshot().communicationFailure);
-            orchestrator_->postCommand({
-                fault ? orchestrator::UserCommandType::InjectCommFailure : orchestrator::UserCommandType::RecoverComm
-            });
-            orchestrator_->setCommFault(fault);
-            orchestrator_->setOperatorMessage(fault
-                ? "[FAULT] Communication failure injected! Link degraded."
-                : "[OK] Communication restored. Nominal wireless link.");
-        }
-        return;
-    }
-
-    // 14. Conflicts
-    if (cmdNum == 14 || firstLower == "conflicts")
-    {
-        if (orchestrator_)
-        {
-            const auto st = orchestrator_->snapshot();
-            std::string msg = "[CONFLICTS] Count: " + std::to_string(st.activeConflicts.size());
-            for (const auto& c : st.activeConflicts)
-            {
-                msg += " | #" + std::to_string(c.trainA) + "<->#" + std::to_string(c.trainB) + " Node " + std::to_string(c.resourceNodeId);
-            }
-            orchestrator_->setOperatorMessage(msg);
-        }
-        return;
-    }
-
-    // 15. Reservations
-    if (cmdNum == 15 || firstLower == "reservations" || firstLower == "reserv")
-    {
-        if (orchestrator_)
-        {
-            const auto st = orchestrator_->snapshot();
-            std::string msg = "[RESERVATIONS] Count: " + std::to_string(st.reservations.size());
-            for (const auto& r : st.reservations)
-            {
-                msg += " | Node " + std::to_string(r.zone.nodeId) + " -> #" + std::to_string(r.trainId);
-            }
-            orchestrator_->setOperatorMessage(msg);
-        }
-        return;
-    }
-
-    // 16. Telemetry
-    if (cmdNum == 16 || firstLower == "telemetry")
-    {
-        if (orchestrator_)
-        {
-            const auto st = orchestrator_->snapshot();
-            orchestrator_->setOperatorMessage("[TELEMETRY] t=" + std::to_string(static_cast<int>(st.simulationTime)) + "s | Active=" + std::to_string(st.trains.size()) + " | Traj=" + std::to_string(st.predictions.size()));
-        }
-        return;
-    }
-
-    // 17. Performance / Metrics
-    if (cmdNum == 17 || firstLower == "metrics" || firstLower == "perf")
-    {
-        if (orchestrator_)
-        {
-            const auto st = orchestrator_->snapshot();
-            orchestrator_->setOperatorMessage("[METRICS] Phys=" + std::to_string(st.timing.physicsCycles) + " | Safe=" + std::to_string(st.timing.safetyCycles) + " | Comm=" + std::to_string(st.timing.commCycles) + " | HMI=" + std::to_string(st.timing.hmiCycles));
-        }
-        return;
-    }
-
-    // 18. Reset
-    if (cmdNum == 18 || firstLower == "reset")
-    {
-        resetSimulation();
-        loadScenario(scenario::ScenarioType::JunctionConflict);
-        startSimulation();
-        if (orchestrator_) { orchestrator_->setOperatorMessage("[OK] Simulation reset complete."); }
-        return;
-    }
-
-    // 19. Shutdown
-    if (cmdNum == 19 || firstLower == "q" || firstLower == "quit" || firstLower == "exit")
-    {
-        shutdown_ = true;
-        if (orchestrator_)
-        {
-            orchestrator_->postCommand({orchestrator::UserCommandType::Shutdown});
-        }
-        return;
-    }
-
-    // Demo Scenarios 24 to 31
-    scenario::ScenarioType scen = scenario::ScenarioType::JunctionConflict;
-    bool isScen = false;
-    if (cmdNum >= 24 && cmdNum <= 31)
-    {
-        isScen = true;
-        switch (cmdNum)
-        {
-        case 24: scen = scenario::ScenarioType::JunctionConflict; break;
-        case 25: scen = scenario::ScenarioType::RearEndConflict; break;
-        case 26: scen = scenario::ScenarioType::HeadOnConflict; break;
-        case 27: scen = scenario::ScenarioType::PlatformConflict; break;
-        case 28: scen = scenario::ScenarioType::MultipleConflicts; break;
-        case 29: scen = scenario::ScenarioType::SensorFailure; break;
-        case 30: scen = scenario::ScenarioType::CommunicationFailure; break;
-        case 31: scen = scenario::ScenarioType::UnsafeStopping; break;
-        }
-    }
-    if (isScen)
-    {
-        loadScenario(scen);
-        startSimulation();
-        if (orchestrator_)
-        {
-            orchestrator_->setOperatorMessage("[SCENARIO LOADED] " + std::string(scenario::ScenarioManager::scenarioName(scen)));
-        }
-        return;
-    }
-
-    if (orchestrator_)
-    {
-        orchestrator_->setOperatorMessage("[ERR] Unknown command: " + line);
-    }
+    std::cout << "======================================================================\n";
 }
 
 void TcasApplication::printHeader() const
 {
     printSeparator();
-    std::cout << "                 TCAS CONTROL CENTER  v2.0\n"
-              << "   Real-Time Train Collision Avoidance System (C++23)\n";
+    std::cout << "                 TCAS CONTROL CENTER — LINUX CONSOLE\n"
+              << "       Real-Time Predictive Train Collision Avoidance System\n";
     printSeparator();
-}
-
-void TcasApplication::printDashboard()
-{
     if (orchestrator_)
     {
-        // Authoritative WorldState observation only — no UI mutation!
-        const auto state = orchestrator_->snapshot();
-        hmi::HmiDisplay::render(state, std::cout);
+        const auto snap = orchestrator_->snapshot();
+        const std::string safeStr = snap.activeConflicts.empty() ? "[SAFE: ALL CLEAR]" : "[ALERT: CONFLICT DETECTED]";
+        std::cout << " SYSTEM: " << (orchestrator_->isRunning() ? "RUNNING" : "STOPPED")
+                  << " | TIME: " << std::fixed << std::setprecision(1) << snap.simulationTime << "s"
+                  << " | SAFETY: " << safeStr
+                  << " | FLEET: " << snap.trains.size() << " Trains\n";
+        if (!snap.operatorMessage.empty())
+        {
+            std::cout << " STATUS: " << snap.operatorMessage << "\n";
+        }
+        printSeparator();
+    }
+}
+
+void TcasApplication::printMainMenu() const
+{
+    printHeader();
+    std::cout << "\n  [1] Fleet Dispatcher & Route Catalog  (Dispatch R-01..R-10, Remove, Speed)\n"
+              << "  [2] Live Simulation Radar             (Interactive real-time observation)\n"
+              << "  [3] Safety, Conflicts & Interlocking  (Active conflicts, Priority decisions)\n"
+              << "  [4] Fault Injection Laboratory        (Sensor drift, Radio blackout)\n"
+              << "  [5] Simulation Clock Controls         (Pause, Resume, Reset)\n"
+              << "  [0] Exit / Shutdown\n\n";
+}
+
+void TcasApplication::handleMainMenuInput(const std::string& input)
+{
+    if (input == "1") { currentMenu_ = MenuState::FleetMenu; }
+    else if (input == "2") { runLiveRadar(); }
+    else if (input == "3") { currentMenu_ = MenuState::SafetyMenu; }
+    else if (input == "4") { currentMenu_ = MenuState::FaultMenu; }
+    else if (input == "5") { currentMenu_ = MenuState::SimControlMenu; }
+    else if (input == "0" || input == "q" || input == "quit" || input == "exit")
+    {
+        shutdown_ = true;
+    }
+    else if (!input.empty())
+    {
+        std::cout << "[ERR] Invalid choice '" << input << "'. Enter 1-5 or 0 to exit.\n";
+    }
+}
+
+void TcasApplication::printFleetMenu() const
+{
+    printSeparator();
+    std::cout << " [1] FLEET DISPATCHER & ROUTE CATALOG\n";
+    printSeparator();
+    std::cout << "  [1] Dispatch Train from Route Catalog (10 Predefined Paths)\n"
+              << "  [2] Quick Custom Dispatch (Dijkstra: Source Node -> Destination Node)\n"
+              << "  [3] Remove Train by ID\n"
+              << "  [4] Set Train Target Speed / Schedule\n"
+              << "  [5] List Active Fleet & Assigned Routes\n"
+              << "  [0] <-- Back to Main Menu\n\n";
+}
+
+void TcasApplication::handleFleetMenuInput(const std::string& input)
+{
+    if (input == "1") { dispatchCatalogInteractive(); }
+    else if (input == "2") { dispatchCustomInteractive(); }
+    else if (input == "3") { removeTrainInteractive(); }
+    else if (input == "4") { setSpeedInteractive(); }
+    else if (input == "5") { listFleet(); }
+    else if (input == "0" || input == "b" || input == "back")
+    {
+        currentMenu_ = MenuState::MainMenu;
+    }
+    else if (!input.empty())
+    {
+        std::cout << "[ERR] Invalid choice. Enter 1-5 or 0.\n";
+    }
+}
+
+void TcasApplication::dispatchCatalogInteractive()
+{
+    printSeparator();
+    std::cout << " PREDEFINED ROUTE CATALOG (10 Realistic Commercial Runs)\n";
+    printSeparator();
+    const auto& routes = scenario::RouteCatalog::allRoutes();
+    for (const auto& r : routes)
+    {
+        std::cout << " [" << std::setw(2) << r.catalogId << "] "
+                  << r.code << " : " << r.name << "\n"
+                  << "      Type: " << trainTypeName(r.defaultType)
+                  << " | Speed: " << static_cast<int>(r.initialSpeed) << " m/s\n"
+                  << "      Note: " << r.conflictNotice << "\n\n";
+    }
+    printSeparator();
+    int choice = readInteger("Enter Route ID to dispatch (1..10, 0=Cancel) > ", 0);
+    if (choice >= 1 && choice <= 10)
+    {
+        auto result = scenario::RouteCatalog::dispatchCatalogRoute(
+            choice, network_, trainManager_);
+        if (result.success)
+        {
+            currentRoutes_.push_back(result.trainRoute);
+            if (pipeline_) { pipeline_->addOrUpdateRoute(result.trainRoute); }
+            if (orchestrator_)
+            {
+                orchestrator_->addTrain(result.trainId);
+                orchestrator_->setTrainRoute(
+                    result.trainId, result.trainRoute.currentTrackId, result.trainRoute.route);
+                orchestrator_->setOperatorMessage(result.message);
+            }
+            std::cout << "\n[SUCCESS] " << result.message << "\n";
+        }
+        else
+        {
+            std::cout << "\n[ERROR] Dispatch failed: " << result.message << "\n";
+        }
+    }
+    waitForEnter();
+}
+
+void TcasApplication::dispatchCustomInteractive()
+{
+    printSeparator();
+    std::cout << " CUSTOM ROUTE DISPATCHER (Dijkstra Shortest Path)\n";
+    printSeparator();
+    std::cout << " Available Nodes:\n"
+              << "  [1] Central Station  [2] Alpha Junction    [3] Beta Junction\n"
+              << "  [4] North Terminal   [5] South Harbor      [6] Freight Approach\n"
+              << "  [7] Freight Yard     [8] Platform A\n";
+    printSeparator();
+    int src = readInteger("Enter Source Node (1..8, 0=Cancel) > ", 0);
+    if (src < 1 || src > 8) { return; }
+    int dst = readInteger("Enter Destination Node (1..8, 0=Cancel) > ", 0);
+    if (dst < 1 || dst > 8 || dst == src) { return; }
+
+    int typeInt = readInteger("Select Train Type (1=Express, 2=Passenger, 3=Freight) [2] > ", 2);
+    TrainType tType = TrainType::Passenger;
+    if (typeInt == 1) tType = TrainType::Express;
+    if (typeInt == 3) tType = TrainType::Freight;
+
+    double spd = readDoubleValue("Enter Initial Speed in m/s [20.0] > ", 20.0);
+
+    auto result = scenario::RouteCatalog::dispatchCustomRoute(
+        static_cast<NodeId>(src), static_cast<NodeId>(dst),
+        tType, spd, network_, trainManager_);
+
+    if (result.success)
+    {
+        currentRoutes_.push_back(result.trainRoute);
+        if (pipeline_) { pipeline_->addOrUpdateRoute(result.trainRoute); }
+        if (orchestrator_)
+        {
+            orchestrator_->addTrain(result.trainId);
+            orchestrator_->setTrainRoute(
+                result.trainId, result.trainRoute.currentTrackId, result.trainRoute.route);
+            orchestrator_->setOperatorMessage(result.message);
+        }
+        std::cout << "\n[SUCCESS] " << result.message << "\n";
     }
     else
     {
-        printSeparator();
-        std::cout << "SYSTEM STATUS : READY (Simulation not yet active)\n";
-        printSeparator();
+        std::cout << "\n[ERROR] " << result.message << "\n";
+    }
+    waitForEnter();
+}
+
+void TcasApplication::removeTrainInteractive()
+{
+    listFleet();
+    int tid = readInteger("Enter Train ID to delete (0=Cancel) > ", 0);
+    if (tid > 0)
+    {
+        if (trainManager_.removeTrain(static_cast<TrainId>(tid)))
+        {
+            if (orchestrator_)
+            {
+                orchestrator_->postCommand({orchestrator::UserCommandType::RemoveTrain, static_cast<TrainId>(tid)});
+                orchestrator_->setOperatorMessage("[OK] Train #" + std::to_string(tid) + " removed from fleet.");
+            }
+            if (pipeline_) { pipeline_->removeRoute(static_cast<TrainId>(tid)); }
+            std::erase_if(currentRoutes_, [tid](const auto& r) { return r.trainId == static_cast<TrainId>(tid); });
+            std::cout << "\n[OK] Train #" << tid << " removed.\n";
+        }
+        else
+        {
+            std::cout << "\n[ERROR] Train #" << tid << " not found in active fleet.\n";
+        }
+    }
+    waitForEnter();
+}
+
+void TcasApplication::setSpeedInteractive()
+{
+    listFleet();
+    int tid = readInteger("Enter Train ID (0=Cancel) > ", 0);
+    if (tid <= 0) return;
+    double spd = readDoubleValue("Enter New Target Speed in m/s > ", 20.0);
+    if (orchestrator_)
+    {
+        orchestrator_->postCommand({orchestrator::UserCommandType::SetSpeed, static_cast<TrainId>(tid), spd});
+        orchestrator_->setOperatorMessage("[OK] Target speed for Train #" + std::to_string(tid) +
+            " set to " + std::to_string(static_cast<int>(spd)) + " m/s");
+        std::cout << "\n[OK] Speed command posted for Train #" << tid << " -> " << spd << " m/s\n";
+    }
+    waitForEnter();
+}
+
+void TcasApplication::listFleet()
+{
+    printSeparator();
+    std::cout << " ACTIVE TRAIN FLEET\n";
+    printSeparator();
+    if (!orchestrator_)
+    {
+        std::cout << "Simulation orchestrator not running.\n";
+        return;
+    }
+    const auto snap = orchestrator_->snapshot();
+    if (snap.trains.empty())
+    {
+        std::cout << "No trains currently active on the network.\n";
+    }
+    else
+    {
+        std::cout << "  ID     TYPE        TRACK   POSITION(m)   SPEED(m/s)  LIMIT   STATE\n"
+                  << " --------------------------------------------------------------------\n";
+        for (const auto& t : snap.trains)
+        {
+            std::cout << "  #" << std::setw(4) << std::left << t.id << ' '
+                      << std::setw(11) << trainTypeName(t.type) << ' '
+                      << std::setw(7) << t.trackId << ' '
+                      << std::setw(13) << std::fixed << std::setprecision(1) << t.position << ' '
+                      << std::setw(11) << t.velocity << ' '
+                      << std::setw(7) << t.maximumSpeed << ' '
+                      << trainStateName(t.state) << '\n';
+        }
+    }
+    printSeparator();
+}
+
+void TcasApplication::printSafetyMenu() const
+{
+    printSeparator();
+    std::cout << " [3] SAFETY, CONFLICTS & INTERLOCKING CENTER\n";
+    printSeparator();
+    std::cout << "  [1] View Active Conflicts & Time-To-Collision (TTC)\n"
+              << "  [2] View Junction & Platform Reservations\n"
+              << "  [3] View Safety Arbitration Decisions & Risk Scores\n"
+              << "  [0] <-- Back to Main Menu\n\n";
+}
+
+void TcasApplication::handleSafetyMenuInput(const std::string& input)
+{
+    if (input == "1") { showActiveConflicts(); }
+    else if (input == "2") { showReservations(); }
+    else if (input == "3") { showDecisions(); }
+    else if (input == "0" || input == "b" || input == "back")
+    {
+        currentMenu_ = MenuState::MainMenu;
+    }
+    else if (!input.empty())
+    {
+        std::cout << "[ERR] Invalid choice. Enter 1-3 or 0.\n";
     }
 }
 
-void TcasApplication::printMenu() const
+void TcasApplication::showActiveConflicts()
 {
-    std::cout << "\nOPERATOR ACTIONS:\n"
-              << "  [1] Start    [2] Pause    [3] Resume   [18] Reset   [19] Shutdown\n"
-              << "  [4] Add Train             [5] Remove Train         [6] Change Speed\n"
-              << "  [7] Change Route          [8] Hold Train           [9] Resume Train\n"
-              << " [10] Inject Sensor Fault  [11] Recover Sensor\n"
-              << " [12] Inject Comm Fault    [13] Recover Comm        [20] Comm Quality\n"
-              << " [14] Show Conflicts       [15] Show Reservations   [16] Show Telemetry\n"
-              << " [17] Show Performance     [22] Show Train Status   [23] Show System Info\n"
-              << "DEMO SCENARIOS:\n"
-              << " [24] Junction Conflict    [25] Rear-End Conflict   [26] Head-On Conflict\n"
-              << " [27] Platform Conflict    [28] Multiple Conflicts  [29] Sensor Failure\n"
-              << " [30] Comm Failure         [31] Unsafe Stopping Distance\n";
     printSeparator();
-    std::cout << "Command > ";
+    std::cout << " ACTIVE CONFLICTS (TCAS Predictive Detection)\n";
+    printSeparator();
+    if (!orchestrator_) return;
+    const auto snap = orchestrator_->snapshot();
+    if (snap.activeConflicts.empty())
+    {
+        std::cout << " [ALL CLEAR] No spatial/temporal conflicts detected across predicted horizons.\n";
+    }
+    else
+    {
+        for (const auto& c : snap.activeConflicts)
+        {
+            std::cout << "  [CONFLICT] Type: " << conflictTypeName(c.type)
+                      << " | Trains: #" << c.trainA << " <-> #" << c.trainB
+                      << " | Resource Node: " << c.resourceNodeId
+                      << "\n             Time to Collision (TTC): " << std::fixed << std::setprecision(2)
+                      << c.firstConflictTime << " s"
+                      << " | Min Separation: " << c.minimumSeparation << " m\n";
+        }
+    }
+    printSeparator();
+    waitForEnter();
 }
 
-void TcasApplication::handleCommand(int cmd)
+void TcasApplication::showReservations()
 {
-    switch (cmd)
+    printSeparator();
+    std::cout << " INTERLOCKING & DYNAMIC RESERVATIONS\n";
+    printSeparator();
+    if (!orchestrator_) return;
+    const auto snap = orchestrator_->snapshot();
+    if (snap.reservations.empty())
     {
-    case 1:  startSimulation(); break;
-    case 2:  pauseSimulation(); break;
-    case 3:  resumeSimulation(); break;
-    case 4:  addTrainInteractive(); break;
-    case 5:  removeTrainInteractive(); break;
-    case 6:  changeSpeedInteractive(); break;
-    case 7:  changeRouteInteractive(); break;
-    case 8:  holdTrainInteractive(); break;
-    case 9:  resumeTrainInteractive(); break;
-    case 10: injectSensorFaultInteractive(); break;
-    case 11: recoverSensorInteractive(); break;
-    case 12: injectCommFaultInteractive(); break;
-    case 13: recoverCommInteractive(); break;
-    case 14:
-        if (orchestrator_)
+        std::cout << " No exclusive junction/platform reservations currently granted.\n";
+    }
+    else
+    {
+        for (const auto& r : snap.reservations)
         {
-            const auto st = orchestrator_->snapshot();
-            std::cout << "\n[ACTIVE CONFLICTS count=" << st.activeConflicts.size() << "]\n";
-            for (const auto& c : st.activeConflicts)
+            std::cout << "  Zone: Node " << r.zone.nodeId
+                      << " | Reserved For: Train #" << r.trainId
+                      << " | Window: [" << std::fixed << std::setprecision(1)
+                      << r.startTime << "s - " << r.endTime << "s]\n";
+        }
+    }
+    printSeparator();
+    waitForEnter();
+}
+
+void TcasApplication::showDecisions()
+{
+    printSeparator();
+    std::cout << " SAFETY ARBITRATION DECISIONS (Priority Hierarchy)\n";
+    printSeparator();
+    if (!orchestrator_) return;
+    const auto snap = orchestrator_->snapshot();
+    if (snap.decisions.empty())
+    {
+        std::cout << " No active arbitration decisions required.\n";
+    }
+    else
+    {
+        for (const auto& d : snap.decisions)
+        {
+            std::cout << "  Priority Train: #" << d.priorityTrain
+                      << " (granted passage)\n"
+                      << "  Yielding Train: #" << d.yieldingTrain
+                      << " -> Command: " << commandName(d.commandType)
+                      << " | Risk Score: " << std::fixed << std::setprecision(2) << d.riskScore << "\n";
+        }
+    }
+    printSeparator();
+    waitForEnter();
+}
+
+void TcasApplication::printFaultMenu() const
+{
+    printSeparator();
+    std::cout << " [4] FAULT INJECTION LABORATORY\n";
+    printSeparator();
+    if (orchestrator_)
+    {
+        const auto snap = orchestrator_->snapshot();
+        std::cout << " Current Status:\n"
+                  << "  Sensors:       " << (snap.sensorFailure ? "[DEGRADED / FAULT]" : "[NOMINAL]") << "\n"
+                  << "  Communication: " << (snap.communicationFailure ? "[FAIL-SAFE BLACKOUT (Speed <= 10m/s)]" : "[NOMINAL]") << "\n";
+        printSeparator();
+    }
+    std::cout << "  [1] Toggle Sensor Fault on Train (Expands uncertainty -> earlier braking)\n"
+              << "  [2] Toggle Wireless Comm Blackout (Enforces fail-safe speed cap 10 m/s)\n"
+              << "  [3] Clear All Active Faults\n"
+              << "  [0] <-- Back to Main Menu\n\n";
+}
+
+void TcasApplication::handleFaultMenuInput(const std::string& input)
+{
+    if (input == "1") { toggleSensorFaultInteractive(); }
+    else if (input == "2") { toggleCommFaultInteractive(); }
+    else if (input == "3") { clearAllFaults(); }
+    else if (input == "0" || input == "b" || input == "back")
+    {
+        currentMenu_ = MenuState::MainMenu;
+    }
+    else if (!input.empty())
+    {
+        std::cout << "[ERR] Invalid choice. Enter 1-3 or 0.\n";
+    }
+}
+
+void TcasApplication::toggleSensorFaultInteractive()
+{
+    listFleet();
+    int tid = readInteger("Enter Train ID to toggle sensor fault (0=All Trains) > ", 0);
+    if (!orchestrator_) return;
+    const bool current = orchestrator_->snapshot().sensorFailure;
+    const bool next = !current;
+    if (tid == 0)
+    {
+        orchestrator_->setSensorFault(next);
+        orchestrator_->postCommand({
+            next ? orchestrator::UserCommandType::InjectSensorFailure : orchestrator::UserCommandType::RecoverSensor
+        });
+    }
+    else
+    {
+        orchestrator_->setSensorFault(static_cast<TrainId>(tid), next);
+        orchestrator_->postCommand({
+            next ? orchestrator::UserCommandType::InjectSensorFailure : orchestrator::UserCommandType::RecoverSensor,
+            static_cast<TrainId>(tid)
+        });
+    }
+    std::cout << "\n[OK] Sensor fault on " << (tid == 0 ? "ALL trains" : ("Train #" + std::to_string(tid)))
+              << " set to " << (next ? "ACTIVE (Uncertainty expanded)" : "CLEARED (Nominal)") << ".\n";
+    waitForEnter();
+}
+
+void TcasApplication::toggleCommFaultInteractive()
+{
+    if (!orchestrator_) return;
+    const bool current = orchestrator_->snapshot().communicationFailure;
+    const bool next = !current;
+    orchestrator_->setCommFault(next);
+    orchestrator_->postCommand({
+        next ? orchestrator::UserCommandType::InjectCommFailure : orchestrator::UserCommandType::RecoverComm
+    });
+    std::cout << "\n[OK] Wireless communication link "
+              << (next ? "SEVERED! Fail-safe speed cap (10 m/s) active." : "RESTORED! Nominal link active.") << "\n";
+    waitForEnter();
+}
+
+void TcasApplication::clearAllFaults()
+{
+    if (!orchestrator_) return;
+    orchestrator_->setSensorFault(false);
+    orchestrator_->setCommFault(false);
+    orchestrator_->postCommand({ orchestrator::UserCommandType::RecoverSensor });
+    orchestrator_->postCommand({ orchestrator::UserCommandType::RecoverComm });
+    std::cout << "\n[OK] All sensor and communication faults cleared.\n";
+    waitForEnter();
+}
+
+void TcasApplication::printSimControlMenu() const
+{
+    printSeparator();
+    std::cout << " [5] SIMULATION CLOCK CONTROLS\n";
+    printSeparator();
+    std::cout << "  [1] Pause Simulation\n"
+              << "  [2] Resume Simulation\n"
+              << "  [3] Reset Simulation (Clear all trains)\n"
+              << "  [0] <-- Back to Main Menu\n\n";
+}
+
+void TcasApplication::handleSimControlMenuInput(const std::string& input)
+{
+    if (input == "1") { pauseSimulation(); }
+    else if (input == "2") { resumeSimulation(); }
+    else if (input == "3") { resetSimulation(); }
+    else if (input == "0" || input == "b" || input == "back")
+    {
+        currentMenu_ = MenuState::MainMenu;
+    }
+    else if (!input.empty())
+    {
+        std::cout << "[ERR] Invalid choice. Enter 1-3 or 0.\n";
+    }
+}
+
+void TcasApplication::runLiveRadar()
+{
+    while (!shutdown_)
+    {
+        printSeparator();
+        std::cout << "               TCAS LIVE SIMULATION RADAR\n";
+        printSeparator();
+        if (!orchestrator_)
+        {
+            std::cout << "Simulation not running.\n";
+            waitForEnter();
+            return;
+        }
+
+        const auto snap = orchestrator_->snapshot();
+        std::cout << " TIME: " << std::fixed << std::setprecision(1) << snap.simulationTime << "s"
+                  << " | STATUS: " << (orchestrator_->isPaused() ? "PAUSED" : "RUNNING")
+                  << " | SAFETY: " << (snap.activeConflicts.empty() ? "SAFE" : "CONFLICT ACTIVE") << "\n";
+        if (!snap.operatorMessage.empty())
+        {
+            std::cout << " NOTE: " << snap.operatorMessage << "\n";
+        }
+        printSeparator();
+
+        std::cout << "  ID     TYPE        TRACK   POSITION(m)   SPEED(m/s)  LIMIT   STATE\n"
+                  << " --------------------------------------------------------------------\n";
+        for (const auto& t : snap.trains)
+        {
+            std::cout << "  #" << std::setw(4) << std::left << t.id << ' '
+                      << std::setw(11) << trainTypeName(t.type) << ' '
+                      << std::setw(7) << t.trackId << ' '
+                      << std::setw(13) << std::fixed << std::setprecision(1) << t.position << ' '
+                      << std::setw(11) << t.velocity << ' '
+                      << std::setw(7) << t.maximumSpeed << ' '
+                      << trainStateName(t.state) << '\n';
+        }
+        printSeparator();
+
+        if (!snap.activeConflicts.empty())
+        {
+            std::cout << " ACTIVE CONFLICTS DETECTED:\n";
+            for (const auto& c : snap.activeConflicts)
             {
-                std::cout << "  Conflict: Trains #" << c.trainA << " <-> #" << c.trainB
-                          << " at Node " << c.resourceNodeId
-                          << " | TTC: " << std::fixed << std::setprecision(2) << c.firstConflictTime << " s"
-                          << " | MinSep: " << c.minimumSeparation << " m\n";
+                std::cout << "  >> " << conflictTypeName(c.type)
+                          << " @ Node " << c.resourceNodeId
+                          << " between Train #" << c.trainA << " and Train #" << c.trainB
+                          << " (TTC: " << std::fixed << std::setprecision(1) << c.firstConflictTime << "s)\n";
             }
         }
-        break;
-    case 15:
-        if (orchestrator_)
+        if (!snap.commands.empty())
         {
-            const auto st = orchestrator_->snapshot();
-            std::cout << "\n[RESERVATIONS count=" << st.reservations.size() << "]\n";
-            for (const auto& r : st.reservations)
+            std::cout << " ACTIVE TCAS INTERVENTIONS:\n";
+            for (const auto& cmd : snap.commands)
             {
-                std::cout << "  Zone Node " << r.zone.nodeId
-                          << " -> Train #" << r.trainId
-                          << " [" << std::fixed << std::setprecision(2) << r.startTime << "s - " << r.endTime << "s]\n";
+                std::cout << "  >> Train #" << cmd.trainId << " : "
+                          << commandName(cmd.type)
+                          << " -> Target Speed " << cmd.targetSpeed << " m/s\n";
             }
         }
-        break;
-    case 16: showTelemetry(); break;
-    case 17: showPerformance(); break;
-    case 18: resetSimulation(); break;
-    case 19:
-        if (orchestrator_) { orchestrator_->stop(); }
-        shutdown_ = true;
-        std::cout << "[OK] TCAS Application shut down cleanly. Goodbye.\n";
-        break;
-    case 20: setCommQualityInteractive(); break;
-    case 21: printDashboard(); break;
-    case 22: showTrainStatus(); break;
-    case 23: showSystemInfo(); break;
+        printSeparator();
 
-    // Scenarios
-    case 24: loadScenario(scenario::ScenarioType::JunctionConflict); startSimulation(); break;
-    case 25: loadScenario(scenario::ScenarioType::RearEndConflict); startSimulation(); break;
-    case 26: loadScenario(scenario::ScenarioType::HeadOnConflict); startSimulation(); break;
-    case 27: loadScenario(scenario::ScenarioType::PlatformConflict); startSimulation(); break;
-    case 28: loadScenario(scenario::ScenarioType::MultipleConflicts); startSimulation(); break;
-    case 29: loadScenario(scenario::ScenarioType::SensorFailure); startSimulation(); break;
-    case 30: loadScenario(scenario::ScenarioType::CommunicationFailure); startSimulation(); break;
-    case 31: loadScenario(scenario::ScenarioType::UnsafeStopping); startSimulation(); break;
-
-    default:
-        if (cmd != -1)
+        std::cout << " [Press ENTER to refresh | 's' to stream 5s live | '0' to return to menu] > ";
+        std::string opt;
+        if (!std::getline(std::cin, opt))
         {
-            std::cout << "[ERR] Unknown command " << cmd << ". Enter a valid menu option.\n";
+            break;
         }
-        break;
+        if (opt == "0" || opt == "q" || opt == "b" || opt == "back")
+        {
+            break;
+        }
+        if (opt == "s" || opt == "stream")
+        {
+            for (int i = 0; i < 5; ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                const auto liveSnap = orchestrator_->snapshot();
+                std::cout << "  [t=" << std::fixed << std::setprecision(1) << liveSnap.simulationTime << "s] ";
+                for (const auto& tr : liveSnap.trains)
+                {
+                    std::cout << "#" << tr.id << " @" << static_cast<int>(tr.position) << "m ("
+                              << static_cast<int>(tr.velocity) << "m/s " << trainStateName(tr.state) << ") ";
+                }
+                std::cout << "\n";
+            }
+            std::cout << "\n";
+        }
     }
 }
 
 void TcasApplication::startSimulation()
 {
-    if (currentRoutes_.empty())
-    {
-        loadScenario(scenario::ScenarioType::JunctionConflict);
-    }
-
     if (orchestrator_ && orchestrator_->isRunning())
     {
-        if (orchestrator_->isPaused())
-        {
-            resumeSimulation();
-        }
-        else
-        {
-            std::cout << "[INFO] Simulation already running.\n";
-        }
         return;
-    }
-
-    if (orchestrator_)
-    {
-        orchestrator_->stop();
-        orchestrator_.reset();
     }
 
     pipeline_ = std::make_unique<orchestrator::SafetyPipeline>(
         network_, trainManager_, currentRoutes_);
 
     std::vector<TrainId> trainIds;
-    for (const auto& route : currentRoutes_)
+    for (const auto& r : currentRoutes_)
     {
-        trainIds.push_back(route.trainId);
+        trainIds.push_back(r.trainId);
     }
 
     orchestrator::OrchestratorConfig cfg;
-    cfg.printHmi = true;
+    cfg.printHmi = false; // Decoupled: do not blind-print over terminal prompt
+    cfg.physicsPeriod = std::chrono::milliseconds(20);
+    cfg.safetyPeriod = std::chrono::milliseconds(50);
+    cfg.communicationPeriod = std::chrono::milliseconds(100);
 
     orchestrator_ = std::make_unique<orchestrator::ThreadOrchestrator>(
-        network_, trainManager_, commChannel_, trainIds, cfg);
+        network_, trainManager_, commChannel_, trainIds, cfg, pipeline_->makeStep());
 
     for (const auto& r : currentRoutes_)
     {
         orchestrator_->setTrainRoute(r.trainId, r.currentTrackId, r.route);
     }
 
-    orchestrator_->setSafetyStep(pipeline_->makeStep());
     orchestrator_->start();
-    orchestrator_->setOperatorMessage("[OK] Simulation started. Real-time safety pipeline active.");
 }
 
 void TcasApplication::pauseSimulation()
 {
-    if (orchestrator_ && orchestrator_->isRunning())
+    if (orchestrator_)
     {
         orchestrator_->pause();
-        orchestrator_->setOperatorMessage("[OK] Simulation PAUSED. Dashboard remains live.");
+        std::cout << "\n[OK] Simulation paused.\n";
     }
+    waitForEnter();
 }
 
 void TcasApplication::resumeSimulation()
 {
-    if (orchestrator_ && orchestrator_->isPaused())
+    if (orchestrator_)
     {
         orchestrator_->resume();
-        orchestrator_->setOperatorMessage("[OK] Simulation RESUMED.");
+        std::cout << "\n[OK] Simulation resumed.\n";
     }
-    else if (!orchestrator_ || !orchestrator_->isRunning())
-    {
-        startSimulation();
-    }
+    waitForEnter();
 }
 
 void TcasApplication::resetSimulation()
@@ -711,382 +878,10 @@ void TcasApplication::resetSimulation()
         orchestrator_->stop();
         orchestrator_.reset();
     }
-    pipeline_.reset();
-    currentRoutes_.clear();
-    std::cout << "[OK] Simulation reset complete. Load a scenario or [1] Start.\n";
-}
-
-void TcasApplication::addTrainInteractive()
-{
-    std::cout << "\nTrain type? [1=Express  2=Passenger  3=Freight]: ";
-    const int typeChoice = readInt();
-    const auto id = readTrainId("Train ID (unique integer): ");
-
-    std::unique_ptr<train::Train> train;
-    switch (typeChoice)
-    {
-    case 1:
-        train = std::make_unique<train::ExpressTrain>(id, 45000.0, 45.0, 0.9, 1.4);
-        break;
-    case 2:
-        train = std::make_unique<train::PassengerTrain>(id, 60000.0, 33.3, 0.8, 1.2);
-        break;
-    case 3:
-    default:
-        train = std::make_unique<train::FreightTrain>(id, 120000.0, 22.2, 0.5, 0.8);
-        break;
-    }
-
-    const double pos = readDouble("Initial position (m): ");
-    const double vel = readDouble("Initial velocity (m/s): ");
-    train->setPosition(pos);
-    train->setVelocity(vel);
-
-    std::cout << "Route Source Node ID: ";
-    const int srcNode = readInt();
-    std::cout << "Route Destination Node ID: ";
-    const int dstNode = readInt();
-
-    const auto route = navigation::RouteNavigator::findRoute(
-        network_, static_cast<NodeId>(srcNode), static_cast<NodeId>(dstNode));
-
-    if (!route.success || route.tracks.empty())
-    {
-        std::cout << "[WARN] No route found between Node " << srcNode << " and Node " << dstNode << ".\n";
-    }
-
-    if (trainManager_.addTrain(std::move(train)))
-    {
-        std::cout << "[OK] Train #" << id << " added to fleet registry.\n";
-        if (route.success && !route.tracks.empty())
-        {
-            orchestrator::SafetyPipeline::TrainRoute tr{
-                id,
-                route.tracks.front(),
-                route
-            };
-            currentRoutes_.push_back(tr);
-            if (pipeline_)
-            {
-                pipeline_->addOrUpdateRoute(tr);
-            }
-            if (orchestrator_)
-            {
-                orchestrator_->setTrainRoute(id, route.tracks.front(), route);
-            }
-            std::cout << "[OK] Route assigned (" << route.totalDistance << " m).\n";
-        }
-
-        if (orchestrator_)
-        {
-            orchestrator_->postCommand({orchestrator::UserCommandType::AddTrain, id});
-        }
-        std::cout << "[OK] Train #" << id << " registered in simulation.\n";
-    }
-    else
-    {
-        std::cout << "[ERR] Train #" << id << " already exists.\n";
-    }
-}
-
-void TcasApplication::removeTrainInteractive()
-{
-    const auto id = readTrainId("Train ID to remove: ");
-    if (trainManager_.removeTrain(id))
-    {
-        if (orchestrator_)
-        {
-            orchestrator_->postCommand({orchestrator::UserCommandType::RemoveTrain, id});
-        }
-        if (pipeline_)
-        {
-            pipeline_->removeRoute(id);
-        }
-        std::erase_if(currentRoutes_, [id](const auto& r) { return r.trainId == id; });
-        std::cout << "[OK] Train #" << id << " removed from simulation and safety pipeline.\n";
-    }
-    else
-    {
-        std::cout << "[ERR] Train #" << id << " not found.\n";
-    }
-}
-
-void TcasApplication::changeSpeedInteractive()
-{
-    const auto id = readTrainId("Train ID: ");
-    const double vel = readDouble("New velocity (m/s): ");
-
-    if (orchestrator_)
-    {
-        // Thread-safe dispatch via UserCommandQueue
-        orchestrator_->postCommand({orchestrator::UserCommandType::SetSpeed, id, vel});
-        std::cout << "[OK] Speed change command posted for Train #" << id << " -> " << vel << " m/s.\n";
-    }
-    else
-    {
-        auto* train = trainManager_.getTrain(id);
-        if (train)
-        {
-            train->setVelocity(vel);
-            std::cout << "[OK] Velocity updated.\n";
-        }
-        else
-        {
-            std::cout << "[ERR] Train #" << id << " not found.\n";
-        }
-    }
-}
-
-void TcasApplication::changeRouteInteractive()
-{
-    const auto id = readTrainId("Train ID to change route: ");
-    auto* train = trainManager_.getTrain(id);
-    if (train == nullptr)
-    {
-        std::cout << "[ERR] Train #" << id << " not found.\n";
-        return;
-    }
-
-    std::cout << "New Source Node ID: ";
-    const int srcNode = readInt();
-    std::cout << "New Destination Node ID: ";
-    const int dstNode = readInt();
-
-    const auto newRoute = navigation::RouteNavigator::findRoute(
-        network_, static_cast<NodeId>(srcNode), static_cast<NodeId>(dstNode));
-
-    if (!newRoute.success || newRoute.tracks.empty())
-    {
-        std::cout << "[ERR] No path found between Node " << srcNode << " and Node " << dstNode << ".\n";
-        return;
-    }
-
-    orchestrator::SafetyPipeline::TrainRoute tr{
-        id,
-        newRoute.tracks.front(),
-        newRoute
-    };
-
-    bool found = false;
-    for (auto& r : currentRoutes_)
-    {
-        if (r.trainId == id)
-        {
-            r = tr;
-            found = true;
-            break;
-        }
-    }
-    if (!found)
-    {
-        currentRoutes_.push_back(tr);
-    }
-
-    if (pipeline_)
-    {
-        pipeline_->addOrUpdateRoute(tr);
-    }
-
-    if (orchestrator_)
-    {
-        orchestrator::UserRouteSpec spec{ id, newRoute.tracks.front(), newRoute };
-        orchestrator_->postCommand({
-            orchestrator::UserCommandType::ChangeRoute,
-            id,
-            0.0,
-            "",
-            spec
-        });
-    }
-
-    std::cout << "[OK] Route updated for Train #" << id << " (" << newRoute.totalDistance << " m).\n";
-}
-
-void TcasApplication::holdTrainInteractive()
-{
-    const auto id = readTrainId("Train ID to hold: ");
-    if (orchestrator_)
-    {
-        orchestrator_->postCommand({orchestrator::UserCommandType::HoldTrain, id});
-        std::cout << "[OK] Hold command posted for Train #" << id << ".\n";
-    }
-    else
-    {
-        auto* t = trainManager_.getTrain(id);
-        if (t) { t->setVelocity(0.0); t->setState(TrainState::Stopped); }
-    }
-}
-
-void TcasApplication::resumeTrainInteractive()
-{
-    const auto id = readTrainId("Train ID to resume: ");
-    const double vel = readDouble("Resume velocity (m/s): ");
-    if (orchestrator_)
-    {
-        orchestrator_->postCommand({orchestrator::UserCommandType::ResumeTrain, id, vel});
-        std::cout << "[OK] Resume command posted for Train #" << id << " -> " << vel << " m/s.\n";
-    }
-    else
-    {
-        auto* t = trainManager_.getTrain(id);
-        if (t) { t->setVelocity(vel); t->setState(TrainState::Running); }
-    }
-}
-
-void TcasApplication::injectSensorFaultInteractive()
-{
-    std::cout << "Train ID to fail sensor (0 for all trains): ";
-    const auto id = static_cast<TrainId>(readInt());
-    if (orchestrator_)
-    {
-        orchestrator_->postCommand({orchestrator::UserCommandType::InjectSensorFailure, id});
-    }
-    std::cout << "[OK] Sensor fault injected for " << (id == 0 ? "all trains" : ("Train #" + std::to_string(id))) << ".\n";
-}
-
-void TcasApplication::recoverSensorInteractive()
-{
-    std::cout << "Train ID to recover sensor (0 for all trains): ";
-    const auto id = static_cast<TrainId>(readInt());
-    if (orchestrator_)
-    {
-        orchestrator_->postCommand({orchestrator::UserCommandType::RecoverSensor, id});
-    }
-    std::cout << "[OK] Sensor recovered for " << (id == 0 ? "all trains" : ("Train #" + std::to_string(id))) << ".\n";
-}
-
-void TcasApplication::injectCommFaultInteractive()
-{
-    if (orchestrator_)
-    {
-        orchestrator_->postCommand({orchestrator::UserCommandType::InjectCommFailure});
-    }
-    std::cout << "[OK] Communication failure injected.\n";
-}
-
-void TcasApplication::recoverCommInteractive()
-{
-    if (orchestrator_)
-    {
-        orchestrator_->postCommand({orchestrator::UserCommandType::RecoverComm});
-    }
-    std::cout << "[OK] Communication failure cleared.\n";
-}
-
-void TcasApplication::setCommQualityInteractive()
-{
-    std::cout << "\nCommunication quality:\n"
-              << "  [1] Normal (clean)\n"
-              << "  [2] Degraded (30% drop rate)\n"
-              << "  [3] Failed (70% drop rate)\n"
-              << "  [4] Recover\n"
-              << "Choice: ";
-    const int c = readInt();
-    if (c == 3)
-    {
-        injectCommFaultInteractive();
-    }
-    else if (c == 4 || c == 1)
-    {
-        recoverCommInteractive();
-    }
-    else
-    {
-        std::cout << "[OK] Setting applied.\n";
-    }
-}
-
-void TcasApplication::showTelemetry()
-{
-    if (!orchestrator_)
-    {
-        std::cout << "[INFO] Simulation not active.\n";
-        return;
-    }
-    const auto st = orchestrator_->snapshot();
-    std::cout << "\n[TELEMETRY STREAM]\n"
-              << "  Simulation Time : " << st.simulationTime << " s\n"
-              << "  System Status   : " << static_cast<int>(st.systemStatus) << "\n"
-              << "  Trains Active   : " << st.trains.size() << "\n"
-              << "  Trajectory Pts  : " << st.predictions.size() << "\n"
-              << "  Active Conflicts: " << st.activeConflicts.size() << "\n"
-              << "  Reservations    : " << st.reservations.size() << "\n"
-              << "  Commands        : " << st.commands.size() << "\n"
-              << "  Sensor Link     : " << (st.sensorFailure ? "DEGRADED" : "OK") << "\n"
-              << "  Comm Link       : " << (st.communicationFailure ? "DEGRADED" : "OK") << "\n";
-}
-
-void TcasApplication::showPerformance()
-{
-    if (!orchestrator_)
-    {
-        std::cout << "[INFO] Simulation not active.\n";
-        return;
-    }
-    const auto m = perfMetrics_.snapshot();
-    std::cout << "\n[SAFETY PERFORMANCE METRICS]\n"
-              << "  Collisions observed   : " << m.collisionCount << "\n"
-              << "  Near-misses observed  : " << m.nearMissCount << "\n"
-              << "  Emergency brake ops   : " << m.emergencyBrakeCount << "\n"
-              << "  Conflict observations : " << m.conflictObservations << "\n"
-              << "  Minimum separation    : " << std::fixed << std::setprecision(2) << m.minimumSeparation << " m\n"
-              << "  Minimum TTC           : " << m.minimumTtc << " s\n"
-              << "  Max HMI loop latency  : " << m.maximumHmiLatencyMs << " ms\n";
-}
-
-void TcasApplication::showTrainStatus()
-{
-    if (!orchestrator_)
-    {
-        std::cout << "[INFO] Simulation not active.\n";
-        return;
-    }
-    const auto st = orchestrator_->snapshot();
-    std::cout << "\n[FLEET STATUS  t = " << std::fixed << std::setprecision(2) << st.simulationTime << " s]\n"
-              << "ID       TYPE       TRACK       POSITION    SPEED     STATE      SENSORS\n";
-    for (const auto& t : st.trains)
-    {
-        const std::string trackStr = (t.trackId != 0) ? ("T" + std::to_string(t.trackId)) : "-";
-        std::cout << std::setw(8) << t.id << ' '
-                  << std::setw(10) << (t.type == TrainType::Express ? "Express" : (t.type == TrainType::Passenger ? "Passenger" : "Freight")) << ' '
-                  << std::setw(10) << trackStr << ' '
-                  << std::setw(10) << t.position << " m  "
-                  << std::setw(8) << t.velocity << " m/s  "
-                  << std::setw(10) << (t.state == TrainState::Running ? "RUNNING" : (t.state == TrainState::Braking ? "BRAKING" : (t.state == TrainState::EmergencyBrake ? "EMERGENCY" : "STOPPED"))) << ' '
-                  << (t.sensorFailure ? "FAULT" : "OK") << '\n';
-    }
-}
-
-void TcasApplication::showSystemInfo()
-{
-    std::cout << "\n[SYSTEM DIAGNOSTICS]\n";
-    if (orchestrator_)
-    {
-        std::cout << "  Physics cycles  : " << orchestrator_->physicsCycles() << "\n"
-                  << "  Safety cycles   : " << orchestrator_->safetyCycles() << "\n"
-                  << "  Comm cycles     : " << orchestrator_->communicationCycles() << "\n"
-                  << "  HMI cycles      : " << orchestrator_->hmiCycles() << "\n"
-                  << "  Running state   : " << (orchestrator_->isRunning() ? "ACTIVE" : "STOPPED") << "\n"
-                  << "  Paused state    : " << (orchestrator_->isPaused() ? "PAUSED" : "RUNNING") << "\n";
-    }
-    else
-    {
-        std::cout << "  Orchestrator not initialized.\n";
-    }
-}
-
-void TcasApplication::loadScenario(scenario::ScenarioType type)
-{
-    if (orchestrator_)
-    {
-        orchestrator_->stop();
-        orchestrator_.reset();
-    }
-
-    scenario::ScenarioManager mgr(network_, trainManager_);
-    const auto result = mgr.load(type);
-
-    currentRoutes_ = result.routes;
+    buildNetwork();
+    startSimulation();
+    std::cout << "\n[OK] Simulation reset complete. Network cleared.\n";
+    waitForEnter();
 }
 
 } // namespace tcas::app

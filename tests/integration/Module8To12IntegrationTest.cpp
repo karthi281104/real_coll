@@ -1,6 +1,7 @@
 #include "communication/CommunicationChannel.hpp"
 #include "orchestrator/SafetyPipeline.hpp"
 #include "orchestrator/ThreadOrchestrator.hpp"
+#include "scenario/RouteCatalog.hpp"
 #include "scenario/ScenarioManager.hpp"
 #include "train/TrainManager.hpp"
 
@@ -185,6 +186,49 @@ TEST(Module8To12IntegrationTest, ScenarioManagerLoadsAllScenarios)
             << " registered no trains.";
         EXPECT_FALSE(result.description.empty());
     }
+}
+
+TEST(Module8To12IntegrationTest, RouteCatalogDispatchAndAutoResume)
+{
+    using namespace scenario;
+    infrastructure::RailwayNetwork network;
+    train::TrainManager manager;
+    communication::CommunicationChannel channel;
+
+    // Build base network
+    ScenarioManager mgr(network, manager);
+    mgr.load(ScenarioType::JunctionConflict);
+
+    // Verify RouteCatalog can dispatch into this network
+    const auto r1 = RouteCatalog::dispatchCatalogRoute(1, network, manager, 201);
+    const auto r2 = RouteCatalog::dispatchCatalogRoute(2, network, manager, 202);
+    ASSERT_TRUE(r1.success);
+    ASSERT_TRUE(r2.success);
+
+    std::vector<orchestrator::SafetyPipeline::TrainRoute> routes = {
+        r1.trainRoute,
+        r2.trainRoute
+    };
+
+    orchestrator::SafetyPipeline pipeline(network, manager, routes);
+    orchestrator::OrchestratorConfig cfg;
+    cfg.safetyPeriod = std::chrono::milliseconds(50);
+    cfg.physicsPeriod = std::chrono::milliseconds(20);
+
+    orchestrator::ThreadOrchestrator orch(
+        network, manager, channel, { 201, 202 }, cfg, pipeline.makeStep());
+
+    orch.setTrainRoute(201, r1.trainRoute.currentTrackId, r1.trainRoute.route);
+    orch.setTrainRoute(202, r2.trainRoute.currentTrackId, r2.trainRoute.route);
+    orch.start();
+
+    // Let the simulation run for several safety cycles
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    orch.stop();
+
+    EXPECT_GE(orch.safetyCycles(), 3U);
+    const auto snap = orch.snapshot();
+    EXPECT_EQ(snap.trains.size(), 2U);
 }
 
 } // namespace

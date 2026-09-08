@@ -580,9 +580,14 @@ void ThreadOrchestrator::physicsLoop()
             const double operatorLimit = operatorSpeedLimits_.contains(trainId)
                 ? operatorSpeedLimits_[trainId]
                 : train->maximumSpeed();
-            const double safetyLimit = safetySpeedLimits_.contains(trainId)
+            double safetyLimit = safetySpeedLimits_.contains(trainId)
                 ? safetySpeedLimits_[trainId]
                 : train->maximumSpeed();
+            if (worldState_.communicationFailure)
+            {
+                // Fail-safe restricted speed (10 m/s) under radio blackout
+                safetyLimit = std::min(safetyLimit, 10.0);
+            }
             train->setVelocity(std::min({
                 newVelocity,
                 operatorLimit,
@@ -631,9 +636,60 @@ void ThreadOrchestrator::safetyLoop()
                     worldState_.commands = result.commands;
                     worldState_.decisions = result.decisions;
                 }
+                std::unordered_set<TrainId> commandedThisCycle;
                 for (const auto& command : result.commands)
                 {
                     commandQueue_.push(command);
+                    commandedThisCycle.insert(command.trainId);
+                    if (command.type == safety::SafetyCommandType::HoldAtSignal ||
+                        command.type == safety::SafetyCommandType::ReduceSpeed)
+                    {
+                        trainsHeldBySafety_.insert(command.trainId);
+                    }
+                }
+
+                // Auto-Resume: If a train was held but no longer has active conflicts/commands, resume it
+                std::vector<TrainId> toResume;
+                for (const auto tid : trainsHeldBySafety_)
+                {
+                    if (!commandedThisCycle.contains(tid))
+                    {
+                        bool inConflict = false;
+                        for (const auto& c : result.activeConflicts)
+                        {
+                            if (c.trainA == tid || c.trainB == tid)
+                            {
+                                inConflict = true;
+                                break;
+                            }
+                        }
+                        if (!inConflict)
+                        {
+                            toResume.push_back(tid);
+                        }
+                    }
+                }
+
+                for (const auto tid : toResume)
+                {
+                    trainsHeldBySafety_.erase(tid);
+                    safetySpeedLimits_.erase(tid);
+                    if (auto* train = trainManager_.getTrain(tid))
+                    {
+                        if (train->state() == TrainState::Braking ||
+                            train->state() == TrainState::Stopped)
+                        {
+                            train->setState(TrainState::Running);
+                            const double targetSpd = operatorSpeedLimits_.contains(tid)
+                                ? operatorSpeedLimits_[tid]
+                                : std::min(20.0, train->maximumSpeed());
+                            train->setVelocity(std::max(train->velocity(), std::min(12.0, targetSpd)));
+                            train->setAcceleration(0.5);
+                        }
+                    }
+                    std::unique_lock lock(worldMutex_);
+                    worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +
+                        std::to_string(tid) + " -> Safe to proceed, re-accelerating.";
                 }
             }
             catch (const std::exception&)

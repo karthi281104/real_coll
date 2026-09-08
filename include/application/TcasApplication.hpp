@@ -5,16 +5,26 @@
 #include "infrastructure/RailwayNetwork.hpp"
 #include "orchestrator/SafetyPipeline.hpp"
 #include "orchestrator/ThreadOrchestrator.hpp"
+#include "scenario/RouteCatalog.hpp"
 #include "scenario/ScenarioManager.hpp"
 #include "train/TrainManager.hpp"
 
 #include <atomic>
 #include <memory>
-#include <thread>
+#include <string>
 #include <vector>
 
 namespace tcas::app
 {
+
+enum class MenuState
+{
+    MainMenu,
+    FleetMenu,
+    SafetyMenu,
+    FaultMenu,
+    SimControlMenu
+};
 
 class TcasApplication
 {
@@ -28,37 +38,50 @@ public:
     int run();
 
 private:
+    void printSeparator() const;
     void printHeader() const;
-    void printDashboard();
-    void printMenu() const;
-    void handleCommand(int cmd);
-    void processLine(const std::string& line);
-    void inputLoop();
 
+    // Menu views
+    void printMainMenu() const;
+    void printFleetMenu() const;
+    void printSafetyMenu() const;
+    void printFaultMenu() const;
+    void printSimControlMenu() const;
+
+    // Menu handlers
+    void handleMainMenuInput(const std::string& input);
+    void handleFleetMenuInput(const std::string& input);
+    void handleSafetyMenuInput(const std::string& input);
+    void handleFaultMenuInput(const std::string& input);
+    void handleSimControlMenuInput(const std::string& input);
+
+    // Fleet operations
+    void dispatchCatalogInteractive();
+    void dispatchCustomInteractive();
+    void removeTrainInteractive();
+    void setSpeedInteractive();
+    void listFleet();
+
+    // Safety & Interlocking views
+    void showActiveConflicts();
+    void showReservations();
+    void showDecisions();
+
+    // Fault injection
+    void toggleSensorFaultInteractive();
+    void toggleCommFaultInteractive();
+    void clearAllFaults();
+
+    // Live Radar observation loop
+    void runLiveRadar();
+
+    // Simulation controls
     void startSimulation();
     void pauseSimulation();
     void resumeSimulation();
     void resetSimulation();
 
-    void addTrainInteractive();
-    void removeTrainInteractive();
-    void changeSpeedInteractive();
-    void changeRouteInteractive();
-    void holdTrainInteractive();
-    void resumeTrainInteractive();
-
-    void injectSensorFaultInteractive();
-    void recoverSensorInteractive();
-    void injectCommFaultInteractive();
-    void recoverCommInteractive();
-    void setCommQualityInteractive();
-
-    void showTelemetry();
-    void showPerformance();
-    void showTrainStatus();
-    void showSystemInfo();
-
-    void loadScenario(scenario::ScenarioType type);
+    void buildNetwork();
 
     infrastructure::RailwayNetwork network_;
     train::TrainManager trainManager_;
@@ -67,8 +90,9 @@ private:
     std::unique_ptr<orchestrator::ThreadOrchestrator> orchestrator_;
     hmi::PerformanceMetrics perfMetrics_;
     std::vector<orchestrator::SafetyPipeline::TrainRoute> currentRoutes_;
+
+    MenuState currentMenu_{ MenuState::MainMenu };
     std::atomic<bool> shutdown_{ false };
-    std::thread inputThread_;
 };
 
 } // namespace tcas::app

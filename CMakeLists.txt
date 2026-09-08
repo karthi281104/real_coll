@@ -46,6 +46,7 @@ add_library(tcas_core
     src/safety/ResolutionEngine.cpp
     src/orchestrator/SafetyPipeline.cpp
     src/scenario/ScenarioManager.cpp
+    src/scenario/RouteCatalog.cpp
     src/orchestrator/ThreadOrchestrator.cpp
     src/hmi/HmiDisplay.cpp
     src/hmi/TelemetryLogger.cpp
@@ -110,6 +111,7 @@ add_executable(tcas_tests
     tests/safety/ResolutionEngineTest.cpp
     tests/safety/SafetyIntegrationTest.cpp
     tests/orchestrator/SafetyPipelineTest.cpp
+    tests/scenario/RouteCatalogTest.cpp
     tests/integration/Module8To12IntegrationTest.cpp
     tests/orchestrator/CommandQueueTest.cpp
     tests/orchestrator/ThreadOrchestratorTest.cpp

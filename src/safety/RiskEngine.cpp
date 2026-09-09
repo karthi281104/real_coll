@@ -93,12 +93,12 @@ double RiskEngine::calculateTtcRisk(
     TimeSeconds ttc
 ) noexcept
 {
-    if (!std::isfinite(ttc))
+    if (!std::isfinite(ttc) || ttc < 0.0)
     {
-        return 35.0;
+        return 0.0;
     }
 
-    if (ttc <= 0.0)
+    if (ttc == 0.0)
     {
         return 35.0;  // Collision already occurring
     }

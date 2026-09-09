@@ -101,4 +101,22 @@ TEST(RiskEngineTest, DegradedCommunicationIncreasesRisk)
     EXPECT_GT(engine.assess(input).score, healthy.score);
 }
 
+TEST(RiskEngineTest, InfiniteAndNegativeTtcProduceZeroTtcRisk)
+{
+    auto input = baseInput();
+    input.timeToCollision = 100.0; // > 60s has 0 TTC risk
+    const RiskEngine engine;
+    const auto baseline = engine.assess(input);
+
+    input.timeToCollision = std::numeric_limits<double>::infinity();
+    const auto infAssessment = engine.assess(input);
+    EXPECT_DOUBLE_EQ(infAssessment.score, baseline.score);
+    EXPECT_LE(infAssessment.score, 30.0);
+    EXPECT_EQ(infAssessment.level, RiskLevel::Low);
+
+    input.timeToCollision = -5.0;
+    const auto negAssessment = engine.assess(input);
+    EXPECT_DOUBLE_EQ(negAssessment.score, baseline.score);
+}
+
 } // namespace tcas::safety

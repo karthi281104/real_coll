@@ -240,7 +240,7 @@ std::vector<Conflict> ConflictDetector::detect(
             const Conflict candidate{
                 trainA,
                 trainB,
-                opposingTrack ? ConflictType::HeadOn : classifySameTrack(a0, b0),
+                opposingTrack ? ConflictType::HeadOn : classifySameTrack(a0, a1, b0, b1),
                 a0.trackId,
                 0,
                 firstTime,
@@ -331,9 +331,44 @@ ConflictType ConflictDetector::classifySameTrack(
     const prediction::FutureState& a,
     const prediction::FutureState& b) const noexcept
 {
-    return (a.velocity * b.velocity < 0.0)
-        ? ConflictType::HeadOn
-        : ConflictType::RearEnd;
+    return classifySameTrack(a, a, b, b);
+}
+
+ConflictType ConflictDetector::classifySameTrack(
+    const prediction::FutureState& a0,
+    const prediction::FutureState& a1,
+    const prediction::FutureState& b0,
+    const prediction::FutureState& b1) const noexcept
+{
+    if (a0.velocity * b0.velocity < 0.0 || a1.velocity * b1.velocity < 0.0)
+    {
+        return ConflictType::HeadOn;
+    }
+
+    const double dispA = a1.position - a0.position;
+    const double dispB = b1.position - b0.position;
+    if (dispA * dispB < 0.0)
+    {
+        return ConflictType::HeadOn;
+    }
+
+    // When one train is stationary and the other is moving in reverse towards it from ahead
+    if (dispA == 0.0 && dispB != 0.0)
+    {
+        if (b0.velocity < 0.0 && b0.position > a0.position)
+        {
+            return ConflictType::HeadOn;
+        }
+    }
+    else if (dispB == 0.0 && dispA != 0.0)
+    {
+        if (a0.velocity < 0.0 && a0.position > b0.position)
+        {
+            return ConflictType::HeadOn;
+        }
+    }
+
+    return ConflictType::RearEnd;
 }
 
 bool ConflictDetector::hasTemporalConflict(

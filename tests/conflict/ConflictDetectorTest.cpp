@@ -98,6 +98,40 @@ TEST(ConflictDetectorTest, DetectsHeadOnConflictWhenVelocityIsOpposite)
     EXPECT_EQ(conflicts[0].type, ConflictType::HeadOn);
 }
 
+TEST(ConflictDetectorTest, DetectsHeadOnConflictWhenReversingTowardsStationaryTrain)
+{
+    const auto network = makeNetwork();
+    ConflictDetector detector({10.0, 5.0, 2.0});
+
+    // Train 1 is stopped at 100m. Train 2 is ahead at 300m moving backwards towards Train 1 (-20 m/s)
+    const auto conflicts = detector.detect(
+        1,
+        {state(0.0, 101, 100.0, 0.0), state(10.0, 101, 100.0, 0.0)},
+        2,
+        {state(0.0, 101, 300.0, -20.0), state(10.0, 101, 100.0, -20.0)},
+        network);
+
+    ASSERT_EQ(conflicts.size(), 1U);
+    EXPECT_EQ(conflicts[0].type, ConflictType::HeadOn);
+}
+
+TEST(ConflictDetectorTest, DetectsRearEndConflictWhenApproachingStationaryTrainFromBehind)
+{
+    const auto network = makeNetwork();
+    ConflictDetector detector({10.0, 5.0, 2.0});
+
+    // Train 1 is at 100m moving forward (+20 m/s). Train 2 is ahead at 300m stopped.
+    const auto conflicts = detector.detect(
+        1,
+        {state(0.0, 101, 100.0, 20.0), state(10.0, 101, 300.0, 20.0)},
+        2,
+        {state(0.0, 101, 300.0, 0.0), state(10.0, 101, 300.0, 0.0)},
+        network);
+
+    ASSERT_EQ(conflicts.size(), 1U);
+    EXPECT_EQ(conflicts[0].type, ConflictType::RearEnd);
+}
+
 TEST(ConflictDetectorTest, DetectsJunctionConflictFromCommonNode)
 {
     const auto network = makeNetwork();

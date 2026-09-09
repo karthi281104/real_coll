@@ -616,4 +616,48 @@ TEST(ThreadOrchestratorTest, CompletedTrainIsRemovedAfterDwellPeriod)
     EXPECT_TRUE(state.trains.empty());
 }
 
+TEST(ThreadOrchestratorTest, EmergencyBrakeTrainIsNotAutoResumed)
+{
+    infrastructure::RailwayNetwork network;
+    network.addNode({ 1, "Station A", infrastructure::NodeType::Generic });
+    network.addNode({ 2, "Station B", infrastructure::NodeType::Generic });
+    network.addTrack({ 101, 1, 2, 2000.0, 30.0, 0.0 });
+
+    train::TrainManager manager;
+    manager.addTrain(std::make_unique<train::ExpressTrain>(
+        1, 45000.0, 45.0, 0.9, 1.4));
+    auto* t = manager.getTrain(1);
+    t->setPosition(100.0);
+    t->setVelocity(0.0);
+    t->setState(TrainState::EmergencyBrake);
+
+    navigation::RouteResult route;
+    route.success = true;
+    route.tracks = { 101 };
+
+    communication::CommunicationChannel channel;
+    OrchestratorConfig config;
+    config.physicsPeriod = std::chrono::milliseconds(10);
+    config.safetyPeriod  = std::chrono::milliseconds(20);
+
+    // Safety step returns no conflicts
+    auto emptyStep = [](const WorldState&) {
+        SafetyCycleResult res;
+        return res;
+    };
+
+    ThreadOrchestrator orchestrator(
+        network, manager, channel, { 1 }, config, emptyStep);
+    orchestrator.setTrainRoute(1, 101, route);
+
+    orchestrator.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    orchestrator.stop();
+
+    auto state = orchestrator.snapshot();
+    ASSERT_EQ(state.trains.size(), 1U);
+    EXPECT_EQ(state.trains.front().state, TrainState::EmergencyBrake);
+    EXPECT_DOUBLE_EQ(state.trains.front().velocity, 0.0);
+}
+
 } // namespace tcas::orchestrator

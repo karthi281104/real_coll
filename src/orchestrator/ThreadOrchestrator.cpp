@@ -938,7 +938,9 @@ void ThreadOrchestrator::safetyLoop()
                         if (!inConflict)
                         {
                             auto* t = trainManager_.getTrain(tid);
-                            if (t != nullptr)
+                            if (t != nullptr &&
+                                t->state() != TrainState::EmergencyBrake &&
+                                !emergencyBrakeSet_.contains(tid))
                             {
                                 toResume.push_back(tid);
                             }
@@ -956,9 +958,13 @@ void ThreadOrchestrator::safetyLoop()
                         continue;
                     }
 
-                    // Full resume: clear safety hold, release emergency brake, and re-accelerate
+                    if (train->state() == TrainState::EmergencyBrake || emergencyBrakeSet_.contains(tid))
+                    {
+                        continue;
+                    }
+
+                    // Full resume: clear safety hold and re-accelerate
                     trainsHeldBySafety_.erase(tid);
-                    emergencyBrakeSet_.erase(tid);
                     safetySpeedLimits_.erase(tid);
                     train->setState(TrainState::Running);
                     train->setAcceleration(0.8);

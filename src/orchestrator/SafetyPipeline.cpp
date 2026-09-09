@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 namespace tcas::orchestrator
 {
@@ -440,6 +441,7 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
     safety::RiskEngine riskEngine;
     safety::PriorityEngine priorityEngine;
     safety::ConflictPriorityQueue conflictQueue;
+    std::unordered_map<std::uint64_t, std::pair<conflict::Conflict, safety::RiskAssessment>> bestConflictPerPair;
 
     for (const auto& detected : allConflicts)
     {
@@ -615,7 +617,18 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         riskInput.communicationConfidence   = state.communicationFailure ? 0.4 : 1.0;
 
         const auto risk = riskEngine.assess(riskInput);
-        conflictQueue.push(detected, risk);
+        auto it = bestConflictPerPair.find(pairKey);
+        if (it == bestConflictPerPair.end() ||
+            risk.score > it->second.second.score ||
+            (risk.score == it->second.second.score && detected.firstConflictTime < it->second.first.firstConflictTime))
+        {
+            bestConflictPerPair[pairKey] = { detected, risk };
+        }
+    }
+
+    for (const auto& [pk, entry] : bestConflictPerPair)
+    {
+        conflictQueue.push(entry.first, entry.second);
     }
 
     // ------------------------------------------------------------------
@@ -852,19 +865,34 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         }
         else if (detected.type == conflict::ConflictType::RearEnd)
         {
-            // If the lead train is far ahead (> 400m) or headway is ample with safe braking margin
-            // and no rapid closing rate, do NOT issue an abrupt brake/hold command.
-            // Allow the train to cruise smoothly at line speed, regulated by convoy speed matching.
             const double leadSpeed = std::max(0.0, prioCtx->proxy->velocity());
             const double closingSpeed = std::max(0.0, yieldCtx->proxy->velocity() - leadSpeed);
-            if (availDist > 400.0 || (availDist > 150.0 && availDist > 2.5 * brakingDist && closingSpeed <= 2.0))
+            const bool currentlyRestricted = (yieldCtx->proxy->state() == TrainState::Braking ||
+                                              yieldCtx->proxy->state() == TrainState::Slowing);
+
+            // Apply hysteresis band around 400m / margin to prevent chattering at the boundary:
+            // If already restricted, require clear margin (availDist > 430m or ample distance & negligible closing)
+            // to release back to NoAction. If unrestricted, only intervene when availDist < 370m or tight margin.
+            const bool allowNoAction = currentlyRestricted
+                ? (availDist > 430.0 || (availDist > 180.0 && availDist > 3.0 * brakingDist && closingSpeed <= 1.0))
+                : (availDist > 370.0 || (availDist > 150.0 && availDist > 2.5 * brakingDist && closingSpeed <= 2.0));
+
+            if (allowNoAction)
             {
                 command.type = safety::SafetyCommandType::NoAction;
                 command.targetSpeed = yieldCtx->proxy->maximumSpeed();
             }
             else if (command.type == safety::SafetyCommandType::ReduceSpeed)
             {
-                command.targetSpeed = std::min(command.targetSpeed, leadSpeed);
+                // Harmonize convoy target speed:
+                // Match with lead speed graded by distance, ensuring at least caution floor
+                const double gradedConvoySpeed = (availDist >= 300.0)
+                    ? std::max(10.0, leadSpeed - 5.0)
+                    : (availDist >= 150.0)
+                        ? std::max(10.0, leadSpeed - 10.0)
+                        : std::min(10.0, leadSpeed);
+
+                command.targetSpeed = std::min(command.targetSpeed, gradedConvoySpeed);
                 if (availDist < 75.0)
                 {
                     command.type = safety::SafetyCommandType::HoldAtSignal;

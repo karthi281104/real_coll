@@ -747,7 +747,32 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
                 command.targetSpeed = 0.0;
             }
         }
-        result.commands.push_back(command);
+        // Deduplicate commands: keep the single most restrictive command per train
+        auto cmdIt = std::find_if(result.commands.begin(), result.commands.end(),
+            [tid = command.trainId](const safety::SafetyCommand& c) {
+                return c.trainId == tid;
+            });
+        if (cmdIt == result.commands.end())
+        {
+            result.commands.push_back(command);
+        }
+        else
+        {
+            auto severity = [](safety::SafetyCommandType t) {
+                switch (t) {
+                case safety::SafetyCommandType::EmergencyBrake: return 4;
+                case safety::SafetyCommandType::HoldAtSignal:   return 3;
+                case safety::SafetyCommandType::ReduceSpeed:    return 2;
+                case safety::SafetyCommandType::NoAction:       return 1;
+                }
+                return 0;
+            };
+            if (severity(command.type) > severity(cmdIt->type) ||
+                (command.type == cmdIt->type && command.targetSpeed < cmdIt->targetSpeed))
+            {
+                *cmdIt = command;
+            }
+        }
 
         // Safety decision record
         SafetyDecision decision;

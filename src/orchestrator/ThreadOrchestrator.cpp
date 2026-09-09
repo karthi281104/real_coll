@@ -692,16 +692,30 @@ void ThreadOrchestrator::physicsLoop()
                             if (leadTrain != nullptr && leadTrain->position() > train->position())
                             {
                                 const double gap = leadTrain->position() - train->position();
-                                if (gap < 400.0)
+                                if (gap < 500.0)
                                 {
                                     const double leadSpeed = std::max(0.0, leadTrain->velocity());
-                                    if (gap < 120.0)
+                                    if (gap < 75.0)
                                     {
-                                        regulatedTargetSpeed = std::min(regulatedTargetSpeed, leadSpeed * 0.7);
+                                        // Very close: stop/hold to prevent collision
+                                        regulatedTargetSpeed = 0.0;
+                                    }
+                                    else if (gap < 150.0)
+                                    {
+                                        // Caution speed: 10 m/s
+                                        regulatedTargetSpeed = std::min(regulatedTargetSpeed, std::min(10.0, leadSpeed));
+                                    }
+                                    else if (gap < 300.0)
+                                    {
+                                        // 3rd train / close following: 10 m/s below lead (e.g. 20 m/s behind 30 m/s)
+                                        const double graded = std::max(10.0, leadSpeed - 10.0);
+                                        regulatedTargetSpeed = std::min(regulatedTargetSpeed, graded);
                                     }
                                     else
                                     {
-                                        regulatedTargetSpeed = std::min(regulatedTargetSpeed, leadSpeed);
+                                        // 2nd train / medium following: 5 m/s below lead (e.g. 30 m/s behind 35 m/s)
+                                        const double graded = std::max(10.0, leadSpeed - 5.0);
+                                        regulatedTargetSpeed = std::min(regulatedTargetSpeed, graded);
                                     }
                                 }
                             }
@@ -799,6 +813,10 @@ void ThreadOrchestrator::safetyLoop()
                 std::unordered_set<TrainId> commandedThisCycle;
                 for (const auto& command : result.commands)
                 {
+                    if (command.type == safety::SafetyCommandType::NoAction)
+                    {
+                        continue;
+                    }
                     commandQueue_.push(command);
                     commandedThisCycle.insert(command.trainId);
                     // Track ALL safety-restricted trains including EmergencyBrake
@@ -832,8 +850,11 @@ void ThreadOrchestrator::safetyLoop()
                         {
                             if (c.trainA == tid || c.trainB == tid)
                             {
-                                inConflict = true;
-                                break;
+                                if (c.firstConflictTime <= 60.0)
+                                {
+                                    inConflict = true;
+                                    break;
+                                }
                             }
                         }
 

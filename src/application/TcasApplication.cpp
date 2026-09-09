@@ -1044,14 +1044,29 @@ void TcasApplication::runLiveRadar()
                           << " (TTC: " << std::fixed << std::setprecision(1) << c.firstConflictTime << "s)\n";
             }
         }
-        if (!snap.commands.empty())
+        bool hasInterventions = false;
+        for (const auto& cmd : snap.commands)
+        {
+            if (cmd.type != safety::SafetyCommandType::NoAction)
+            {
+                hasInterventions = true;
+                break;
+            }
+        }
+        if (hasInterventions)
         {
             std::cout << " ACTIVE TCAS INTERVENTIONS:\n";
+            std::unordered_set<TrainId> shownTrains;
             for (const auto& cmd : snap.commands)
             {
-                std::cout << "  >> Train #" << cmd.trainId << " : "
-                          << commandName(cmd.type)
-                          << " -> Target Speed " << cmd.targetSpeed << " m/s\n";
+                if (cmd.type != safety::SafetyCommandType::NoAction && !shownTrains.contains(cmd.trainId))
+                {
+                    shownTrains.insert(cmd.trainId);
+                    std::cout << "  >> Train #" << cmd.trainId << " : "
+                              << commandName(cmd.type)
+                              << " -> Target Speed " << std::fixed << std::setprecision(1)
+                              << cmd.targetSpeed << " m/s\n";
+                }
             }
         }
         printSeparator();

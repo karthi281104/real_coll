@@ -248,16 +248,21 @@ std::vector<Conflict> ConflictDetector::detect(
                 minimumSeparation
             };
 
-            const bool duplicate = std::any_of(
+            auto it = std::find_if(
                 conflicts.begin(),
                 conflicts.end(),
                 [&](const Conflict& existing)
                 {
                     return existing.trackId == candidate.trackId &&
-                           existing.type == candidate.type &&
-                           std::abs(existing.firstConflictTime - candidate.firstConflictTime) < 1e-9;
+                           existing.type == candidate.type;
                 });
-            if (!duplicate)
+            if (it != conflicts.end())
+            {
+                it->firstConflictTime = std::min(it->firstConflictTime, candidate.firstConflictTime);
+                it->lastConflictTime = std::max(it->lastConflictTime, candidate.lastConflictTime);
+                it->minimumSeparation = std::min(it->minimumSeparation, candidate.minimumSeparation);
+            }
+            else
             {
                 conflicts.push_back(candidate);
             }
@@ -299,16 +304,20 @@ std::vector<Conflict> ConflictDetector::detect(
                 0.0
             };
 
-            const bool duplicate = std::any_of(
+            auto it = std::find_if(
                 conflicts.begin(),
                 conflicts.end(),
                 [&](const Conflict& existing)
                 {
                     return existing.type == candidate.type &&
-                           existing.resourceNodeId == candidate.resourceNodeId &&
-                           std::abs(existing.firstConflictTime - candidate.firstConflictTime) < 1e-9;
+                           existing.resourceNodeId == candidate.resourceNodeId;
                 });
-            if (!duplicate)
+            if (it != conflicts.end())
+            {
+                it->firstConflictTime = std::min(it->firstConflictTime, candidate.firstConflictTime);
+                it->lastConflictTime = std::max(it->lastConflictTime, candidate.lastConflictTime);
+            }
+            else
             {
                 conflicts.push_back(candidate);
             }

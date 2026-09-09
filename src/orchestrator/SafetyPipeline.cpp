@@ -326,7 +326,75 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         }
     }
 
+    const TimeSeconds currentTime = state.simulationTime;
+
+    // Release reservations whose reserving train has already passed through the zone
+    for (const auto& r : reservations_.reservations())
+    {
+        for (const auto& ctx : contexts)
+        {
+            if (ctx.proxy->id() == r.trainId)
+            {
+                if (r.zone.nodeId != 0)
+                {
+                    const auto* curTrack = network_.getTrack(ctx.currentTrackId);
+                    if (curTrack != nullptr && curTrack->source() == r.zone.nodeId && ctx.proxy->position() > 25.0)
+                    {
+                        static_cast<void>(reservations_.release(r.trainId, r.zone));
+                    }
+                }
+            }
+        }
+    }
+    reservations_.clearReleased();
+    reservations_.clearExpired(currentTime);
+
+    // If any train is approaching a node currently reserved by ANOTHER train,
+    // maintain the reservation conflict so yielding trains hold safely until cleared
+    for (const auto& r : reservations_.reservations())
+    {
+        if (r.state != conflict::ResourceState::Reserved)
+        {
+            continue;
+        }
+        for (const auto& ctx : contexts)
+        {
+            if (ctx.proxy->id() != r.trainId && ctx.route != nullptr && r.zone.nodeId != 0)
+            {
+                const double dist = distanceToNode(
+                    network_, *ctx.route, ctx.currentTrackId, ctx.proxy->position(), r.zone.nodeId);
+                if (dist >= 0.0 && dist <= 500.0)
+                {
+                    conflict::Conflict resConflict{
+                        r.trainId,
+                        ctx.proxy->id(),
+                        (r.zone.type == conflict::ConflictZoneType::Junction)
+                            ? conflict::ConflictType::Junction
+                            : conflict::ConflictType::Platform,
+                        0,
+                        r.zone.nodeId,
+                        std::max(0.0, r.startTime - currentTime),
+                        std::max(0.0, r.endTime - currentTime),
+                        dist
+                    };
+                    const bool dup = std::any_of(
+                        allConflicts.begin(), allConflicts.end(),
+                        [&](const conflict::Conflict& ex) {
+                            return ex.resourceNodeId == r.zone.nodeId &&
+                                   ((ex.trainA == r.trainId && ex.trainB == ctx.proxy->id()) ||
+                                    (ex.trainB == r.trainId && ex.trainA == ctx.proxy->id()));
+                        });
+                    if (!dup)
+                    {
+                        allConflicts.push_back(resConflict);
+                    }
+                }
+            }
+        }
+    }
+
     result.activeConflicts = allConflicts;
+    result.reservations = reservations_.reservations();
 
     if (allConflicts.empty())
     {
@@ -339,8 +407,6 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
     safety::RiskEngine riskEngine;
     safety::PriorityEngine priorityEngine;
     safety::ConflictPriorityQueue conflictQueue;
-
-    const TimeSeconds currentTime = state.simulationTime;
 
     for (const auto& detected : allConflicts)
     {
@@ -439,10 +505,6 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
     // Step 5 — Module 9+10: Process queue, reserve, resolve
     // ------------------------------------------------------------------
     safety::ResolutionEngine resolutionEngine;
-
-    // Release stale reservations from previous cycles
-    reservations_.clearReleased();
-    reservations_.clearExpired(currentTime); // Expire zones the clock has already passed
 
     while (!conflictQueue.empty())
     {
@@ -605,7 +667,16 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             brakingDist
         };
 
-        const auto command = resolutionEngine.resolve(resInput);
+        auto command = resolutionEngine.resolve(resInput);
+        if (detected.resourceNodeId != 0 &&
+            (yieldCtx->proxy->state() == TrainState::Stopped ||
+             yieldCtx->proxy->state() == TrainState::EmergencyBrake ||
+             yieldCtx->proxy->velocity() < 0.1) &&
+            command.type != safety::SafetyCommandType::EmergencyBrake)
+        {
+            command.type = safety::SafetyCommandType::HoldAtSignal;
+            command.targetSpeed = 0.0;
+        }
         result.commands.push_back(command);
 
         // Safety decision record

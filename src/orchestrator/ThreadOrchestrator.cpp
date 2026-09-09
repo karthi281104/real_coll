@@ -790,12 +790,6 @@ void ThreadOrchestrator::safetyLoop()
                 std::vector<TrainId> toResume;
                 for (const auto tid : trainsHeldBySafety_)
                 {
-                    // Skip trains that require operator reset
-                    if (emergencyBrakeSet_.contains(tid))
-                    {
-                        continue;
-                    }
-
                     if (!commandedThisCycle.contains(tid))
                     {
                         bool inConflict = false;
@@ -808,9 +802,9 @@ void ThreadOrchestrator::safetyLoop()
                             }
                         }
 
-                        // LOGIC-2 fix: if the only active conflicts involving
-                        // this train are with OTHER stopped trains (deadlock),
-                        // allow resume so both sides can clear the junction.
+                        // If the only active conflicts involving this train are with
+                        // other stopped trains (deadlock resolution), allow resume
+                        // so both sides can clear the junction.
                         if (inConflict)
                         {
                             bool onlyStoppedPartners = true;
@@ -818,6 +812,11 @@ void ThreadOrchestrator::safetyLoop()
                             {
                                 if (c.trainA == tid || c.trainB == tid)
                                 {
+                                    if (c.type != conflict::ConflictType::Junction)
+                                    {
+                                        onlyStoppedPartners = false;
+                                        break;
+                                    }
                                     const TrainId partner = (c.trainA == tid) ? c.trainB : c.trainA;
                                     const auto* partnerTrain = trainManager_.getTrain(partner);
                                     if (partnerTrain == nullptr ||
@@ -837,7 +836,7 @@ void ThreadOrchestrator::safetyLoop()
 
                         if (!inConflict)
                         {
-                            // BUG-4 fix: only resume once the train has fully stopped
+                            // Only resume once the train has fully stopped (not while decelerating in Braking)
                             auto* t = trainManager_.getTrain(tid);
                             if (t != nullptr &&
                                 t->state() != TrainState::Braking)
@@ -851,27 +850,25 @@ void ThreadOrchestrator::safetyLoop()
                 for (const auto tid : toResume)
                 {
                     auto* train = trainManager_.getTrain(tid);
-                    if (train == nullptr) { trainsHeldBySafety_.erase(tid); continue; }
+                    if (train == nullptr)
+                    {
+                        trainsHeldBySafety_.erase(tid);
+                        emergencyBrakeSet_.erase(tid);
+                        continue;
+                    }
 
-                    // Full resume: clear safety hold and re-accelerate.
-                    // BUG-1 fix: restore to the stored dispatch speed, not a
-                    // hardcoded 15 m/s constant.
+                    // Full resume: clear safety hold, release emergency brake, and re-accelerate
                     trainsHeldBySafety_.erase(tid);
+                    emergencyBrakeSet_.erase(tid);
                     safetySpeedLimits_.erase(tid);
                     train->setState(TrainState::Running);
-                    train->setAcceleration(0.5);
+                    train->setAcceleration(0.8);
                     if (train->velocity() < 1.0)
                     {
-                        const double dispatchSpd = dispatchSpeeds_.contains(tid)
-                            ? dispatchSpeeds_[tid]
-                            : (operatorSpeedLimits_.contains(tid)
-                                ? operatorSpeedLimits_[tid]
-                                : std::min(20.0, train->maximumSpeed()));
-                        train->setVelocity(std::max(train->velocity(),
-                            std::min(dispatchSpd, train->maximumSpeed())));
+                        train->setVelocity(1.0);
                     }
                     worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +
-                        std::to_string(tid) + " -> Signal cleared, re-accelerating.";
+                        std::to_string(tid) + " -> Signal cleared, re-accelerating to line speed.";
                 }
             }
             catch (const std::exception&)

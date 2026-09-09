@@ -757,6 +757,16 @@ void TcasApplication::listFleet()
                       << stateStr << '\n';
         }
     }
+
+    const auto arrivedIds = orchestrator_->arrivedTrainIds();
+    if (!arrivedIds.empty())
+    {
+        std::cout << "\n >> COMPLETED / ARRIVED TRAINS (IDs Permanently Retired This Session):\n";
+        for (const auto tid : arrivedIds)
+        {
+            std::cout << "    * Train #" << tid << " [ARRIVED AT DESTINATION & CLEARED - ID NOT REUSED]\n";
+        }
+    }
     printSeparator();
 }
 

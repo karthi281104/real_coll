@@ -133,6 +133,48 @@ TEST(RouteCatalogTest, AllFiftySixSourceDestinationPairsAreRoutable)
     EXPECT_EQ(successCount, 56U);
 }
 
+TEST(RouteCatalogTest, DoesNotReuseTrainIdOfArrivedOrRemovedTrains)
+{
+    const auto net = buildTestNetwork();
+    train::TrainManager mgr;
+
+    // Dispatch Train 1 and 2
+    const auto r1 = RouteCatalog::dispatchCatalogRoute(1, net, mgr);
+    EXPECT_TRUE(r1.success);
+    EXPECT_EQ(r1.trainId, 101U);
+
+    const auto r2 = RouteCatalog::dispatchCatalogRoute(2, net, mgr);
+    EXPECT_TRUE(r2.success);
+    EXPECT_EQ(r2.trainId, 102U);
+
+    // Train 101 arrives at destination and is removed from active fleet
+    EXPECT_TRUE(mgr.removeTrain(101));
+    EXPECT_EQ(mgr.getTrain(101), nullptr);
+
+    // Dispatch another train (R-01 again)
+    // It must NOT reuse Train ID 101!
+    const auto r3 = RouteCatalog::dispatchCatalogRoute(1, net, mgr);
+    EXPECT_TRUE(r3.success);
+    EXPECT_EQ(r3.trainId, 103U);
+
+    // Train 102 arrives at destination and is removed
+    EXPECT_TRUE(mgr.removeTrain(102));
+    EXPECT_EQ(mgr.getTrain(102), nullptr);
+
+    // Dispatch custom route
+    // It must NOT reuse 101 or 102!
+    const auto r4 = RouteCatalog::dispatchCustomRoute(
+        1, 4, TrainType::Passenger, 25.0, net, mgr);
+    EXPECT_TRUE(r4.success);
+    EXPECT_EQ(r4.trainId, 104U);
+
+    // Even if someone explicitly suggests 101 (an arrived train's ID), it must not reuse it!
+    const auto r5 = RouteCatalog::dispatchCatalogRoute(1, net, mgr, 101);
+    EXPECT_TRUE(r5.success);
+    EXPECT_NE(r5.trainId, 101U);
+    EXPECT_EQ(r5.trainId, 105U);
+}
+
 } // namespace
 } // namespace tcas::scenario
 

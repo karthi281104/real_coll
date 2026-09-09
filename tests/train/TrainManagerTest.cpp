@@ -240,3 +240,34 @@ TEST(TrainManagerTest, ClearRemovesAllTrains)
 
     EXPECT_EQ(manager.trainCount(), 0);
 }
+
+TEST(TrainManagerTest, TracksUsedIdsEvenAfterRemoval)
+{
+    TrainManager manager;
+
+    EXPECT_FALSE(manager.hasEverUsedId(101));
+
+    manager.addTrain(
+        std::make_unique<ExpressTrain>(
+            101,
+            50000.0,
+            45.0,
+            0.8,
+            1.2
+        )
+    );
+
+    EXPECT_TRUE(manager.hasEverUsedId(101));
+    EXPECT_TRUE(manager.contains(101));
+
+    // Remove train (simulating arrival / completion)
+    EXPECT_TRUE(manager.removeTrain(101));
+    EXPECT_FALSE(manager.contains(101));
+
+    // Must still remember that 101 was used!
+    EXPECT_TRUE(manager.hasEverUsedId(101));
+
+    // Clear resets history for new session
+    manager.clear();
+    EXPECT_FALSE(manager.hasEverUsedId(101));
+}

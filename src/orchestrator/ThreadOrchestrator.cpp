@@ -662,6 +662,7 @@ void ThreadOrchestrator::physicsLoop()
                 if (train->state() == TrainState::Completed && !arrivalTimes_.contains(trainId))
                 {
                     arrivalTimes_[trainId] = worldState_.simulationTime;
+                    arrivedTrainIds_.insert(trainId);
                 }
             }
             else if (train->state() == TrainState::Stopped ||
@@ -1280,12 +1281,21 @@ std::vector<CommandLifecycleRecord> ThreadOrchestrator::commandHistory() const
     return commandHistory_;
 }
 
+std::vector<TrainId> ThreadOrchestrator::arrivedTrainIds() const
+{
+    std::shared_lock lock(worldMutex_);
+    std::vector<TrainId> res(arrivedTrainIds_.begin(), arrivedTrainIds_.end());
+    std::sort(res.begin(), res.end());
+    return res;
+}
+
 void ThreadOrchestrator::clearHistory()
 {
     std::unique_lock lock(worldMutex_);
     conflictHistory_.clear();
     reservationHistory_.clear();
     commandHistory_.clear();
+    arrivedTrainIds_.clear();
     activeConflictRecordMap_.clear();
     activeReservationRecordMap_.clear();
     lastRecordedCommand_.clear();

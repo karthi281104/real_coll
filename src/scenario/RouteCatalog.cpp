@@ -137,11 +137,13 @@ std::unique_ptr<train::Train> createTrainByType(
 TrainId allocateNextTrainId(const train::TrainManager& manager, TrainId suggested)
 {
     if (suggested != 0 && manager.getTrain(suggested) == nullptr)
+    if (suggested != 0 && !manager.hasEverUsedId(suggested) && manager.getTrain(suggested) == nullptr)
     {
         return suggested;
     }
     TrainId candidate = 101;
     while (manager.getTrain(candidate) != nullptr)
+    while (manager.hasEverUsedId(candidate) || manager.getTrain(candidate) != nullptr)
     {
         ++candidate;
     }

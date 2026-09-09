@@ -108,6 +108,7 @@ public:
     [[nodiscard]] std::vector<ConflictLifecycleRecord> conflictHistory() const;
     [[nodiscard]] std::vector<ReservationLifecycleRecord> reservationHistory() const;
     [[nodiscard]] std::vector<CommandLifecycleRecord> commandHistory() const;
+    [[nodiscard]] std::vector<TrainId> arrivedTrainIds() const;
     void clearHistory();
 
 private:
@@ -146,6 +147,7 @@ private:
     /// they may move again — they are NOT auto-resumed by the safety loop.
     std::unordered_set<TrainId> emergencyBrakeSet_;
     std::unordered_map<TrainId, TimeSeconds> arrivalTimes_;
+    std::unordered_set<TrainId> arrivedTrainIds_;
     std::atomic<bool> userCommFault_{ false };
     std::atomic<bool> commChannelDegraded_{ false };
     /// Previous-cycle degradation state for hysteresis (LOGIC-7 fix).

@@ -19,6 +19,11 @@ bool TrainManager::addTrain(
     const auto [iterator, inserted] =
         trains_.emplace(id, std::move(train));
 
+    if (inserted)
+    {
+        usedIds_.insert(id);
+    }
+
     return inserted;
 }
 
@@ -62,6 +67,12 @@ bool TrainManager::contains(TrainId id) const noexcept
     return trains_.contains(id);
 }
 
+bool TrainManager::hasEverUsedId(TrainId id) const noexcept
+{
+    std::shared_lock lock(mutex_);
+    return usedIds_.contains(id);
+}
+
 std::size_t TrainManager::trainCount() const noexcept
 {
     std::shared_lock lock(mutex_);
@@ -72,6 +83,7 @@ void TrainManager::clear() noexcept
 {
     std::unique_lock lock(mutex_);
     trains_.clear();
+    usedIds_.clear();
 }
 
 } // namespace tcas::train

@@ -6,6 +6,7 @@
 #include <memory>
 #include <shared_mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace tcas::train
 {
@@ -29,6 +30,9 @@ public:
     bool contains(TrainId id) const noexcept;
 
     [[nodiscard]]
+    bool hasEverUsedId(TrainId id) const noexcept;
+
+    [[nodiscard]]
     std::size_t trainCount() const noexcept;
 
     void clear() noexcept;
@@ -39,6 +43,7 @@ private:
         TrainId,
         std::unique_ptr<Train>
     > trains_;
+    std::unordered_set<TrainId> usedIds_;
 };
 
 } // namespace tcas::train

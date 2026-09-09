@@ -53,23 +53,22 @@ void ScenarioManager::buildBaseNetwork()
 
     // Directed tracks
     //  Central -> Alpha
-    network_.addTrack(infrastructure::Track(101, 1, 2, 2000.0, 35.0, 0.000));
-    //  Alpha -> Central (opposing track for Head-On collision scenario)
-    network_.addTrack(infrastructure::Track(201, 2, 1, 2000.0, 35.0, 0.000));
-    //  Alpha -> Beta
-    network_.addTrack(infrastructure::Track(102, 2, 3, 1500.0, 30.0, 0.020));
-    //  Beta -> North
+    network_.addTrack(infrastructure::Track(101, 1, 2, 2000.0, 35.0,  0.000));
+    network_.addTrack(infrastructure::Track(201, 2, 1, 2000.0, 35.0,  0.000));
+    network_.addTrack(infrastructure::Track(102, 2, 3, 1500.0, 30.0,  0.020));
+    network_.addTrack(infrastructure::Track(202, 3, 2, 1500.0, 30.0, -0.020));
     network_.addTrack(infrastructure::Track(103, 3, 4, 2500.0, 40.0, -0.015));
-    //  Alpha -> South
-    network_.addTrack(infrastructure::Track(104, 2, 5, 3000.0, 25.0, 0.010));
-    //  Freight Approach -> Alpha
-    network_.addTrack(infrastructure::Track(105, 6, 2, 2000.0, 25.0, 0.000));
-    //  Alpha -> Freight Yard
-    network_.addTrack(infrastructure::Track(106, 2, 7, 1800.0, 25.0, 0.000));
-    //  South -> Platform A (for platform conflict scenario)
-    network_.addTrack(infrastructure::Track(107, 5, 8, 500.0, 20.0, 0.000));
-    //  Beta -> Platform A (second approach to same platform)
-    network_.addTrack(infrastructure::Track(108, 3, 8, 600.0, 20.0, 0.000));
+    network_.addTrack(infrastructure::Track(203, 4, 3, 2500.0, 40.0,  0.015));
+    network_.addTrack(infrastructure::Track(104, 2, 5, 3000.0, 25.0,  0.010));
+    network_.addTrack(infrastructure::Track(204, 5, 2, 3000.0, 25.0, -0.010));
+    network_.addTrack(infrastructure::Track(105, 6, 2, 2000.0, 25.0,  0.000));
+    network_.addTrack(infrastructure::Track(205, 2, 6, 2000.0, 25.0,  0.000));
+    network_.addTrack(infrastructure::Track(106, 2, 7, 1800.0, 25.0,  0.000));
+    network_.addTrack(infrastructure::Track(206, 7, 2, 1800.0, 25.0,  0.000));
+    network_.addTrack(infrastructure::Track(107, 5, 8,  500.0, 20.0,  0.000));
+    network_.addTrack(infrastructure::Track(207, 8, 5, 1000.0, 20.0,  0.000));
+    network_.addTrack(infrastructure::Track(108, 3, 8,  600.0, 20.0,  0.000));
+    network_.addTrack(infrastructure::Track(208, 8, 3, 1100.0, 20.0,  0.000));
 }
 
 // -----------------------------------------------------------------------

@@ -1,5 +1,6 @@
 #include "scenario/RouteCatalog.hpp"
 #include "infrastructure/RailwayNetwork.hpp"
+#include "navigation/RouteNavigator.hpp"
 #include "train/TrainManager.hpp"
 
 #include <gtest/gtest.h>
@@ -22,15 +23,22 @@ infrastructure::RailwayNetwork buildTestNetwork()
     net.addNode(Node(7, "Freight Yard",      NodeType::Generic));
     net.addNode(Node(8, "Platform A",        NodeType::Platform));
 
-    net.addTrack(Track(101, 1, 2, 2000.0, 35.0, 0.000));
-    net.addTrack(Track(201, 2, 1, 2000.0, 35.0, 0.000));
-    net.addTrack(Track(102, 2, 3, 1500.0, 30.0, 0.020));
+    net.addTrack(Track(101, 1, 2, 2000.0, 35.0,  0.000));
+    net.addTrack(Track(201, 2, 1, 2000.0, 35.0,  0.000));
+    net.addTrack(Track(102, 2, 3, 1500.0, 30.0,  0.020));
+    net.addTrack(Track(202, 3, 2, 1500.0, 30.0, -0.020));
     net.addTrack(Track(103, 3, 4, 2500.0, 40.0, -0.015));
-    net.addTrack(Track(104, 2, 5, 3000.0, 25.0, 0.010));
-    net.addTrack(Track(105, 6, 2, 2000.0, 25.0, 0.000));
-    net.addTrack(Track(106, 2, 7, 1800.0, 25.0, 0.000));
-    net.addTrack(Track(107, 5, 8,  500.0, 20.0, 0.000));
-    net.addTrack(Track(108, 3, 8,  600.0, 20.0, 0.000));
+    net.addTrack(Track(203, 4, 3, 2500.0, 40.0,  0.015));
+    net.addTrack(Track(104, 2, 5, 3000.0, 25.0,  0.010));
+    net.addTrack(Track(204, 5, 2, 3000.0, 25.0, -0.010));
+    net.addTrack(Track(105, 6, 2, 2000.0, 25.0,  0.000));
+    net.addTrack(Track(205, 2, 6, 2000.0, 25.0,  0.000));
+    net.addTrack(Track(106, 2, 7, 1800.0, 25.0,  0.000));
+    net.addTrack(Track(206, 7, 2, 1800.0, 25.0,  0.000));
+    net.addTrack(Track(107, 5, 8,  500.0, 20.0,  0.000));
+    net.addTrack(Track(207, 8, 5, 1000.0, 20.0,  0.000));
+    net.addTrack(Track(108, 3, 8,  600.0, 20.0,  0.000));
+    net.addTrack(Track(208, 8, 3, 1100.0, 20.0,  0.000));
     return net;
 }
 
@@ -84,10 +92,45 @@ TEST(RouteCatalogTest, CustomRouteDispatch)
     EXPECT_TRUE(resValid.success);
     EXPECT_EQ(mgr.trainCount(), 1U);
 
-    // Invalid path where no directed track connects (e.g. 4 to 1)
-    const auto resInvalid = RouteCatalog::dispatchCustomRoute(
+    // Valid reverse path from 4 to 1
+    const auto resReverse = RouteCatalog::dispatchCustomRoute(
         4, 1, TrainType::Passenger, 20.0, net, mgr);
+    EXPECT_TRUE(resReverse.success);
+    EXPECT_EQ(mgr.trainCount(), 2U);
+
+    // Invalid non-existent node
+    const auto resInvalid = RouteCatalog::dispatchCustomRoute(
+        99, 1, TrainType::Passenger, 20.0, net, mgr);
     EXPECT_FALSE(resInvalid.success);
+
+    // Invalid same node
+    const auto resSame = RouteCatalog::dispatchCustomRoute(
+        1, 1, TrainType::Passenger, 20.0, net, mgr);
+    EXPECT_FALSE(resSame.success);
+}
+
+TEST(RouteCatalogTest, AllFiftySixSourceDestinationPairsAreRoutable)
+{
+    const auto net = buildTestNetwork();
+    std::size_t successCount = 0;
+
+    for (NodeId src = 1; src <= 8; ++src)
+    {
+        for (NodeId dst = 1; dst <= 8; ++dst)
+        {
+            if (src == dst) { continue; }
+            const auto route = navigation::RouteNavigator::findRoute(net, src, dst);
+            EXPECT_TRUE(route.success)
+                << "Expected reachable path from Node " << src << " to Node " << dst;
+            EXPECT_FALSE(route.tracks.empty());
+            EXPECT_GT(route.totalDistance, 0.0);
+            if (route.success && !route.tracks.empty())
+            {
+                ++successCount;
+            }
+        }
+    }
+    EXPECT_EQ(successCount, 56U);
 }
 
 } // namespace

@@ -171,15 +171,22 @@ void TcasApplication::buildNetwork()
     network_.addNode(Node(7, "Freight Yard",      NodeType::Generic));
     network_.addNode(Node(8, "Platform A",        NodeType::Platform));
 
-    network_.addTrack(Track(101, 1, 2, 2000.0, 35.0, 0.000));
-    network_.addTrack(Track(201, 2, 1, 2000.0, 35.0, 0.000));
-    network_.addTrack(Track(102, 2, 3, 1500.0, 30.0, 0.020));
+    network_.addTrack(Track(101, 1, 2, 2000.0, 35.0,  0.000));
+    network_.addTrack(Track(201, 2, 1, 2000.0, 35.0,  0.000));
+    network_.addTrack(Track(102, 2, 3, 1500.0, 30.0,  0.020));
+    network_.addTrack(Track(202, 3, 2, 1500.0, 30.0, -0.020));
     network_.addTrack(Track(103, 3, 4, 2500.0, 40.0, -0.015));
-    network_.addTrack(Track(104, 2, 5, 3000.0, 25.0, 0.010));
-    network_.addTrack(Track(105, 6, 2, 2000.0, 25.0, 0.000));
-    network_.addTrack(Track(106, 2, 7, 1800.0, 25.0, 0.000));
-    network_.addTrack(Track(107, 5, 8,  500.0, 20.0, 0.000));
-    network_.addTrack(Track(108, 3, 8,  600.0, 20.0, 0.000));
+    network_.addTrack(Track(203, 4, 3, 2500.0, 40.0,  0.015));
+    network_.addTrack(Track(104, 2, 5, 3000.0, 25.0,  0.010));
+    network_.addTrack(Track(204, 5, 2, 3000.0, 25.0, -0.010));
+    network_.addTrack(Track(105, 6, 2, 2000.0, 25.0,  0.000));
+    network_.addTrack(Track(205, 2, 6, 2000.0, 25.0,  0.000));
+    network_.addTrack(Track(106, 2, 7, 1800.0, 25.0,  0.000));
+    network_.addTrack(Track(206, 7, 2, 1800.0, 25.0,  0.000));
+    network_.addTrack(Track(107, 5, 8,  500.0, 20.0,  0.000));
+    network_.addTrack(Track(207, 8, 5, 1000.0, 20.0,  0.000));
+    network_.addTrack(Track(108, 3, 8,  600.0, 20.0,  0.000));
+    network_.addTrack(Track(208, 8, 3, 1100.0, 20.0,  0.000));
 }
 
 int TcasApplication::run()

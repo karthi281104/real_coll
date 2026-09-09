@@ -932,6 +932,27 @@ void TcasApplication::showDecisions()
         }
     }
 
+    std::cout << "\n >> ACTIVE TRAIN SAFETY RESTRICTIONS & HOLDS:\n";
+    bool anyHeld = false;
+    for (const auto& tr : snap.trains)
+    {
+        if (tr.state == TrainState::EmergencyBrake ||
+            tr.state == TrainState::Stopped ||
+            tr.state == TrainState::Braking ||
+            tr.state == TrainState::Slowing)
+        {
+            anyHeld = true;
+            std::cout << "    * Train #" << tr.id << " (" << trainTypeName(tr.type) << ")"
+                      << " on Track " << tr.trackId << " @ " << std::fixed << std::setprecision(1) << tr.position << "m"
+                      << " | Current State: " << trainStateName(tr.state)
+                      << " | Speed: " << tr.velocity << " m/s\n";
+        }
+    }
+    if (!anyHeld)
+    {
+        std::cout << "    No trains currently under safety hold or emergency braking.\n";
+    }
+
     std::cout << "\n >> SESSION SAFETY COMMAND AUDIT LOG (Total: " << history.size() << "):\n";
     if (history.empty())
     {

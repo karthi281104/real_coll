@@ -41,7 +41,7 @@ struct ConflictLifecycleRecord
     TrainId trainB{ 0 };
     conflict::ConflictType type{ conflict::ConflictType::RearEnd };
     TrackId trackId{ 0 };
-    infrastructure::NodeId resourceNodeId{ 0 };
+    NodeId resourceNodeId{ 0 };
     TimeSeconds initialTtc{ 0.0 };
     DistanceMeters initialSeparation{ 0.0 };
 
@@ -51,7 +51,7 @@ struct ConflictLifecycleRecord
     safety::SafetyCommandType commandType{ safety::SafetyCommandType::NoAction };
     double targetSpeed{ 0.0 };
     bool reservationMade{ false };
-    infrastructure::NodeId reservedNodeId{ 0 };
+    NodeId reservedNodeId{ 0 };
 
     std::string resolutionOutcome;
 };
@@ -60,7 +60,7 @@ struct ReservationLifecycleRecord
 {
     std::size_t id{ 0 };
     TrainId trainId{ 0 };
-    infrastructure::NodeId nodeId{ 0 };
+    NodeId nodeId{ 0 };
     conflict::ConflictZoneType zoneType{ conflict::ConflictZoneType::Junction };
     TimeSeconds requestedTime{ 0.0 };
     TimeSeconds startTime{ 0.0 };

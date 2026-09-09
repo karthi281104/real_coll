@@ -916,8 +916,8 @@ void ThreadOrchestrator::safetyLoop()
                 for (const auto& c : result.activeConflicts)
                 {
                     const std::uint64_t cKey =
-                        (static_cast<std::uint64_t>(std::min(c.trainA, c.trainB)) << 32) |
-                        static_cast<std::uint64_t>(std::max(c.trainA, c.trainB)) ^
+                        ((static_cast<std::uint64_t>(std::min(c.trainA, c.trainB)) << 32) |
+                         static_cast<std::uint64_t>(std::max(c.trainA, c.trainB))) ^
                         (static_cast<std::uint64_t>(c.type) << 24) ^
                         (static_cast<std::uint64_t>(c.resourceNodeId) << 8);
 
@@ -1138,9 +1138,7 @@ void ThreadOrchestrator::safetyLoop()
                         if (!inConflict)
                         {
                             auto* t = trainManager_.getTrain(tid);
-                            if (t != nullptr &&
-                                t->state() != TrainState::EmergencyBrake &&
-                                !emergencyBrakeSet_.contains(tid))
+                            if (t != nullptr && t->state() != TrainState::Completed)
                             {
                                 toResume.push_back(tid);
                             }
@@ -1151,20 +1149,16 @@ void ThreadOrchestrator::safetyLoop()
                 for (const auto tid : toResume)
                 {
                     auto* train = trainManager_.getTrain(tid);
-                    if (train == nullptr)
+                    if (train == nullptr || train->state() == TrainState::Completed)
                     {
                         trainsHeldBySafety_.erase(tid);
                         emergencyBrakeSet_.erase(tid);
                         continue;
                     }
 
-                    if (train->state() == TrainState::EmergencyBrake || emergencyBrakeSet_.contains(tid))
-                    {
-                        continue;
-                    }
-
-                    // Full resume: clear safety hold and re-accelerate
+                    // Full resume: clear safety hold, emergency lock, and re-accelerate
                     trainsHeldBySafety_.erase(tid);
+                    emergencyBrakeSet_.erase(tid);
                     safetySpeedLimits_.erase(tid);
                     train->setState(TrainState::Running);
                     train->setAcceleration(0.8);

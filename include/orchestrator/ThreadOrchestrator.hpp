@@ -34,7 +34,7 @@ struct OrchestratorConfig
     std::chrono::milliseconds hmiPeriod{ 200 };
     bool printHmi{ false };
     std::string telemetryDirectory{ "logs" };
-    TimeSeconds completedTrainDwellSeconds{ 5.0 };
+    TimeSeconds completedTrainDwellSeconds{ 15.0 };
 };
 
 struct SafetyCycleResult

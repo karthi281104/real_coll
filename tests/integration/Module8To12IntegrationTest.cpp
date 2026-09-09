@@ -352,5 +352,45 @@ TEST(Module8To12IntegrationTest, Diagnostic100SecondSimulation)
     }
 }
 
+TEST(Module8To12IntegrationTest, RearEndConvoyHeadwaySpeedMatching)
+{
+    using namespace scenario;
+    infrastructure::RailwayNetwork network;
+    train::TrainManager manager;
+    ScenarioManager mgr(network, manager);
+    const auto scenarioResult = mgr.load(ScenarioType::RearEndConflict);
+
+    orchestrator::SafetyPipeline pipeline(network, manager, scenarioResult.routes);
+
+    communication::CommunicationChannel channel;
+    orchestrator::OrchestratorConfig config;
+    config.physicsPeriod = std::chrono::milliseconds(20);
+    config.safetyPeriod  = std::chrono::milliseconds(50);
+
+    orchestrator::ThreadOrchestrator orch(
+        network, manager, channel, {1, 2}, config, pipeline.makeStep());
+
+    for (const auto& r : scenarioResult.routes)
+    {
+        orch.setTrainRoute(r.trainId, r.currentTrackId, r.route);
+    }
+
+    auto* p1 = manager.getTrain(1);
+    auto* e2 = manager.getTrain(2);
+
+    ASSERT_NE(p1, nullptr);
+    ASSERT_NE(e2, nullptr);
+
+    orch.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    orch.stop();
+
+    // Verify trains remain safely separated and no collision occurred
+    EXPECT_LT(e2->position(), p1->position());
+    EXPECT_GT(p1->position() - e2->position(), 50.0);
+    // Express should have adapted speed to convoy headway rather than crashing
+    EXPECT_LE(e2->velocity(), 25.0);
+}
+
 } // namespace
 } // namespace tcas

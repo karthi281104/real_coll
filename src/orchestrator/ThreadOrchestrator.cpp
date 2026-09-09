@@ -671,10 +671,45 @@ void ThreadOrchestrator::physicsLoop()
             }
             else
             {
-                const double targetMaxSpeed = std::min({
+                double regulatedTargetSpeed = std::min({
                     operatorLimit,
                     safetyLimit,
                     train->maximumSpeed()});
+
+                // Convoy / headway regulation: If a lead train is ahead on the same track,
+                // adjust regulatedTargetSpeed to match lead speed and avoid stop-go accordion cycling.
+                auto myNavIt = navStates_.find(trainId);
+                if (myNavIt != navStates_.end() && myNavIt->second.currentTrackId != 0)
+                {
+                    const TrackId curTrk = myNavIt->second.currentTrackId;
+                    for (const TrainId otherId : trainIds_)
+                    {
+                        if (otherId == trainId) { continue; }
+                        auto otherNavIt = navStates_.find(otherId);
+                        if (otherNavIt != navStates_.end() && otherNavIt->second.currentTrackId == curTrk)
+                        {
+                            const auto* leadTrain = trainManager_.getTrain(otherId);
+                            if (leadTrain != nullptr && leadTrain->position() > train->position())
+                            {
+                                const double gap = leadTrain->position() - train->position();
+                                if (gap < 400.0)
+                                {
+                                    const double leadSpeed = std::max(0.0, leadTrain->velocity());
+                                    if (gap < 120.0)
+                                    {
+                                        regulatedTargetSpeed = std::min(regulatedTargetSpeed, leadSpeed * 0.7);
+                                    }
+                                    else
+                                    {
+                                        regulatedTargetSpeed = std::min(regulatedTargetSpeed, leadSpeed);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                const double targetMaxSpeed = regulatedTargetSpeed;
 
                 // SLOWING: service braking to target — transition to Running once at limit
                 if (train->state() == TrainState::Slowing)

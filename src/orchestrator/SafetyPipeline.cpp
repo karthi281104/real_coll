@@ -338,7 +338,28 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
                 if (r.zone.nodeId != 0)
                 {
                     const auto* curTrack = network_.getTrack(ctx.currentTrackId);
+                    bool passedNode = false;
                     if (curTrack != nullptr && curTrack->source() == r.zone.nodeId && ctx.proxy->position() > 25.0)
+                    {
+                        passedNode = true;
+                    }
+                    else if (ctx.route != nullptr)
+                    {
+                        const auto it = std::find(ctx.route->tracks.begin(), ctx.route->tracks.end(), ctx.currentTrackId);
+                        if (it != ctx.route->tracks.end())
+                        {
+                            for (auto trkIt = ctx.route->tracks.begin(); trkIt != it; ++trkIt)
+                            {
+                                const auto* prevTrk = network_.getTrack(*trkIt);
+                                if (prevTrk != nullptr && prevTrk->destination() == r.zone.nodeId)
+                                {
+                                    passedNode = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (passedNode)
                     {
                         static_cast<void>(reservations_.release(r.trainId, r.zone));
                     }
@@ -348,6 +369,18 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
     }
     reservations_.clearReleased();
     reservations_.clearExpired(currentTime);
+
+    // Retain sticky priorities only for pairs that are still in active conflicts
+    std::unordered_set<std::uint64_t> activePairs;
+    for (const auto& c : allConflicts)
+    {
+        activePairs.insert(
+            (static_cast<std::uint64_t>(std::min(c.trainA, c.trainB)) << 32) |
+            static_cast<std::uint64_t>(std::max(c.trainA, c.trainB)));
+    }
+    std::erase_if(stickyPriorities_, [&activePairs](const auto& item) {
+        return !activePairs.contains(item.first);
+    });
 
     // If any train is approaching a node currently reserved by ANOTHER train,
     // maintain the reservation conflict so yielding trains hold safely until cleared
@@ -425,18 +458,29 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         const double relVel = std::abs(
             ctxA->proxy->velocity() - ctxB->proxy->velocity());
 
-        // Determine the yielding train (lower priority)
-        const auto prioA = priorityEngine.assess(*ctxA->proxy);
-        const auto prioB = priorityEngine.assess(*ctxB->proxy);
-        // LOGIC-1 fix: when types are equal, the train with higher approach
-        // velocity is harder to stop and therefore gets priority.
-        // Tiebreak on lower ID only when velocities are also equal.
-        const bool aHasPriority =
-            prioA.higherThan(prioB) ||
-            (prioA.priority == prioB.priority &&
-             (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
-              (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
-               ctxA->proxy->id() < ctxB->proxy->id())));
+        // Determine the yielding train (lower priority) with sticky priority support
+        const std::uint64_t pairKey =
+            (static_cast<std::uint64_t>(std::min(ctxA->proxy->id(), ctxB->proxy->id())) << 32) |
+            static_cast<std::uint64_t>(std::max(ctxA->proxy->id(), ctxB->proxy->id()));
+
+        bool aHasPriority = false;
+        auto stickyIt = stickyPriorities_.find(pairKey);
+        if (stickyIt != stickyPriorities_.end())
+        {
+            aHasPriority = (stickyIt->second == ctxA->proxy->id());
+        }
+        else
+        {
+            const auto prioA = priorityEngine.assess(*ctxA->proxy);
+            const auto prioB = priorityEngine.assess(*ctxB->proxy);
+            aHasPriority =
+                prioA.higherThan(prioB) ||
+                (prioA.priority == prioB.priority &&
+                 (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
+                  (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
+                   ctxA->proxy->id() < ctxB->proxy->id())));
+            stickyPriorities_[pairKey] = aHasPriority ? ctxA->proxy->id() : ctxB->proxy->id();
+        }
 
         const TrainContext* yieldCtx = aHasPriority ? ctxB : ctxA;
 
@@ -495,6 +539,7 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         riskInput.conflictType              = detected.type;
         riskInput.trainMass                 = yieldCtx->proxy->mass();
         riskInput.sensorConfidence          = (yieldCtx->hasSensorFault || state.sensorFailure) ? 0.5 : 1.0;
+        riskInput.sensorConfidence          = yieldCtx->hasSensorFault ? 0.5 : 1.0;
         riskInput.communicationConfidence   = state.communicationFailure ? 0.4 : 1.0;
 
         const auto risk = riskEngine.assess(riskInput);
@@ -523,15 +568,28 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         }
         if (ctxA == nullptr || ctxB == nullptr) { continue; }
 
-        const auto prioA = priorityEngine.assess(*ctxA->proxy);
-        const auto prioB = priorityEngine.assess(*ctxB->proxy);
-        // LOGIC-1 fix: same tiebreaker as Step 4
-        const bool aHasPriority =
-            prioA.higherThan(prioB) ||
-            (prioA.priority == prioB.priority &&
-             (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
-              (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
-               ctxA->proxy->id() < ctxB->proxy->id())));
+        const std::uint64_t pairKey =
+            (static_cast<std::uint64_t>(std::min(ctxA->proxy->id(), ctxB->proxy->id())) << 32) |
+            static_cast<std::uint64_t>(std::max(ctxA->proxy->id(), ctxB->proxy->id()));
+
+        bool aHasPriority = false;
+        auto stickyIt = stickyPriorities_.find(pairKey);
+        if (stickyIt != stickyPriorities_.end())
+        {
+            aHasPriority = (stickyIt->second == ctxA->proxy->id());
+        }
+        else
+        {
+            const auto prioA = priorityEngine.assess(*ctxA->proxy);
+            const auto prioB = priorityEngine.assess(*ctxB->proxy);
+            aHasPriority =
+                prioA.higherThan(prioB) ||
+                (prioA.priority == prioB.priority &&
+                 (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
+                  (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
+                   ctxA->proxy->id() < ctxB->proxy->id())));
+            stickyPriorities_[pairKey] = aHasPriority ? ctxA->proxy->id() : ctxB->proxy->id();
+        }
 
         const TrainContext* prioCtx  = aHasPriority ? ctxA : ctxB;
         const TrainContext* yieldCtx = aHasPriority ? ctxB : ctxA;
@@ -676,6 +734,18 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         {
             command.type = safety::SafetyCommandType::HoldAtSignal;
             command.targetSpeed = 0.0;
+        }
+        else if (detected.type == conflict::ConflictType::RearEnd &&
+                 command.type == safety::SafetyCommandType::ReduceSpeed)
+        {
+            // For rear-end closing conflicts, match the lead train's speed to cruise safely in convoy
+            const double leadSpeed = std::max(0.0, prioCtx->proxy->velocity());
+            command.targetSpeed = std::min(command.targetSpeed, leadSpeed);
+            if (command.targetSpeed < 3.0)
+            {
+                command.type = safety::SafetyCommandType::HoldAtSignal;
+                command.targetSpeed = 0.0;
+            }
         }
         result.commands.push_back(command);
 

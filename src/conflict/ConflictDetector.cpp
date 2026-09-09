@@ -417,8 +417,20 @@ bool ConflictDetector::hasTemporalConflict(
         }
         const Sample a = interpolate(a0, a1, start + candidate);
         const Sample b = interpolate(b0, b1, start + candidate);
-        minimumSeparation =
-            std::min(minimumSeparation, std::abs(a.position - b.position));
+        const double separation = std::abs(a.position - b.position);
+        minimumSeparation = std::min(minimumSeparation, separation);
+
+        const double margin =
+            config_.minimumTrackSeparation + a.uncertainty + b.uncertainty;
+        if (separation <= margin)
+        {
+            if (!conflict)
+            {
+                firstTime = start + candidate;
+                conflict = true;
+            }
+            lastTime = std::max(lastTime, start + candidate);
+        }
     }
 
     for (std::size_t index = 0; index + 1 < candidates.size(); ++index)
@@ -439,6 +451,7 @@ bool ConflictDetector::hasTemporalConflict(
                 conflict = true;
             }
             lastTime = start + right;
+            lastTime = std::max(lastTime, start + right);
         }
     }
 

@@ -6,7 +6,9 @@
 #include "orchestrator/ThreadOrchestrator.hpp"
 #include "train/TrainManager.hpp"
 
+#include <cstdint>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace tcas::orchestrator
@@ -56,6 +58,7 @@ private:
     mutable std::mutex routesMutex_;
     std::vector<TrainRoute> routes_;
     conflict::ResourceReservationManager reservations_;
+    std::unordered_map<std::uint64_t, TrainId> stickyPriorities_;
 };
 
 } // namespace tcas::orchestrator

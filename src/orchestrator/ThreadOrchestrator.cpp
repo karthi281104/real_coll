@@ -671,16 +671,16 @@ void ThreadOrchestrator::physicsLoop()
             }
             else
             {
-                const double effectiveSpeed = std::min({
-                    newVelocity,
+                const double targetMaxSpeed = std::min({
                     operatorLimit,
                     safetyLimit,
                     train->maximumSpeed()});
-                train->setVelocity(effectiveSpeed);
 
                 // SLOWING: service braking to target — transition to Running once at limit
                 if (train->state() == TrainState::Slowing)
                 {
+                    const double effectiveSpeed = std::min(newVelocity, targetMaxSpeed);
+                    train->setVelocity(effectiveSpeed);
                     if (train->velocity() <= safetyLimit + 0.1)
                     {
                         train->setAcceleration(0.0);
@@ -690,12 +690,33 @@ void ThreadOrchestrator::physicsLoop()
                 // BRAKING: approaching HoldAtSignal — transition to Stopped when velocity reaches 0
                 else if (train->state() == TrainState::Braking)
                 {
+                    const double effectiveSpeed = std::max(0.0, newVelocity);
+                    train->setVelocity(effectiveSpeed);
                     if (train->velocity() <= 0.1)
                     {
                         train->setVelocity(0.0);
                         train->setAcceleration(0.0);
                         train->setState(TrainState::Stopped);
                     }
+                }
+                // RUNNING: When there is no collision / safety intervention, accelerate and travel at max speed
+                else if (train->state() == TrainState::Running)
+                {
+                    if (train->velocity() < targetMaxSpeed - 0.05)
+                    {
+                        train->setAcceleration(0.8);
+                        train->setVelocity(std::min(newVelocity, targetMaxSpeed));
+                    }
+                    else
+                    {
+                        train->setVelocity(targetMaxSpeed);
+                        train->setAcceleration(0.0);
+                    }
+                }
+                else
+                {
+                    const double effectiveSpeed = std::min(newVelocity, targetMaxSpeed);
+                    train->setVelocity(effectiveSpeed);
                 }
             }
         }

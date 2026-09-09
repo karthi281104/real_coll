@@ -552,15 +552,15 @@ void TcasApplication::dispatchCustomInteractive()
     TrainType tType = TrainType::Passenger;
     while (true)
     {
-        std::cout << "Select Train Type (1=Express, 2=Passenger, 3=Freight, 0=Cancel) [2] > ";
+        std::cout << "Select Train Type (1=Express, 2=Passenger, 3=Freight, 0=Cancel) > ";
         std::string line;
         if (!std::getline(std::cin, line)) { return; }
         line.erase(0, line.find_first_not_of(" \t\r\n"));
         line.erase(line.find_last_not_of(" \t\r\n") + 1);
         if (line.empty())
         {
-            tType = TrainType::Passenger;
-            break;
+            std::cout << "  [ERROR] Input cannot be empty. Please enter a value for train type (1=Express, 2=Passenger, 3=Freight, 0=Cancel).\n";
+            continue;
         }
         try
         {
@@ -589,21 +589,21 @@ void TcasApplication::dispatchCustomInteractive()
     }
 
     // Step 4: Initial Speed validation loop
-    const double defaultSpd = (tType == TrainType::Freight) ? 20.0 : 33.3;
     const double maxAllowed = (tType == TrainType::Express) ? 45.0 :
                               ((tType == TrainType::Freight) ? 22.2 : 33.3);
-    double spd = defaultSpd;
+    double spd = 0.0;
     while (true)
     {
-        std::cout << "Enter Initial Speed in m/s (1.0.." << maxAllowed << ", 0=Cancel) [" << defaultSpd << "] > ";
+        std::cout << "Enter Initial Speed in m/s (1.0.." << maxAllowed << ", 0=Cancel) > ";
         std::string line;
         if (!std::getline(std::cin, line)) { return; }
         line.erase(0, line.find_first_not_of(" \t\r\n"));
         line.erase(line.find_last_not_of(" \t\r\n") + 1);
         if (line.empty())
         {
-            spd = defaultSpd;
-            break;
+            std::cout << "  [ERROR] Input cannot be empty. Please enter a value for initial speed (1.0.."
+                      << maxAllowed << " m/s, 0=Cancel).\n";
+            continue;
         }
         try
         {
@@ -611,7 +611,7 @@ void TcasApplication::dispatchCustomInteractive()
             spd = std::stod(line, &idx);
             if (idx != line.size())
             {
-                std::cout << "  [ERROR] Invalid characters in speed. Please enter a numeric value (e.g. " << defaultSpd << ").\n";
+                std::cout << "  [ERROR] Invalid characters in speed. Please enter a numeric value (e.g. 25.0).\n";
                 continue;
             }
             if (spd == 0.0)

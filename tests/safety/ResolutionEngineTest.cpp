@@ -220,4 +220,26 @@ TEST(
     EXPECT_TRUE(command.isEmergency());
 }
 
+TEST(
+    ResolutionEngineTest,
+    SlowMovingTrainMaintainsCautionFloorWhenDistanceIsAmple)
+{
+    train::FreightTrain slowTrain(
+        4, 120000.0, 22.2, 0.5, 0.8);
+    slowTrain.setVelocity(1.0);
+
+    const auto command = ResolutionEngine{}.resolve({
+        slowTrain,
+        makeConflict(),
+        makeRisk(RiskLevel::Medium, 50.0),
+        false,
+        true,
+        500.0,
+        10.0
+    });
+
+    EXPECT_EQ(command.type, SafetyCommandType::ReduceSpeed);
+    EXPECT_GE(command.targetSpeed, 3.0);
+}
+
 } // namespace tcas::safety

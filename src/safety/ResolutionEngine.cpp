@@ -124,22 +124,22 @@ SafetyCommand ResolutionEngine::reduceSpeed(
         std::max(0.0, input.train.velocity());
 
     // Halve the current speed as the target reduction.
-    // Apply a minimum floor: if the halved target would drop below
-    // kMinReduceSpeedFloor m/s, escalate to HoldAtSignal instead so the
-    // train fully stops rather than crawling asymptotically near zero.
+    // Only escalate to HoldAtSignal if physical distance is critically tight (< 50m).
+    // Otherwise maintain a caution speed floor (5.0 m/s) so trains accelerating
+    // from a stop or moving slowly do not get trapped in an endless brake cycle.
     constexpr SpeedMetersPerSecond kMinReduceSpeedFloor = 3.0;
+    constexpr SpeedMetersPerSecond kCautionSpeedFloor = 5.0;
     const SpeedMetersPerSecond halved = currentSpeed * 0.5;
 
-    if (halved < kMinReduceSpeedFloor)
+    if (halved < kMinReduceSpeedFloor && input.availableDistance < 50.0)
     {
-        // Escalate: train is already too slow to meaningfully reduce speed,
-        // issue a hold so it completes the braking cleanly.
+        // Escalate: train is critically close to obstacle and too slow to reduce speed further
         command.type = SafetyCommandType::HoldAtSignal;
         command.targetSpeed = 0.0;
         return command;
     }
 
-    command.targetSpeed = halved;
+    command.targetSpeed = std::max(halved, std::min(kCautionSpeedFloor, input.train.maximumSpeed()));
     return command;
 }
 

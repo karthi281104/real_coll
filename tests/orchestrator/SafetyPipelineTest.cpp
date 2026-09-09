@@ -176,4 +176,46 @@ TEST(SafetyPipelineTest, SetRoutesUpdatesContext)
         {{ 1, 101, navigation::RouteNavigator::findRoute(network, 1, 3) }}));
 }
 
+TEST(SafetyPipelineTest, DistantRearEndConvoyReceivesNoBrakingCommand)
+{
+    const auto network = makeJunctionNetwork();
+    train::TrainManager manager;
+    manager.addTrain(std::make_unique<train::ExpressTrain>(
+        1, 45000.0, 45.0, 0.9, 1.4));
+    manager.getTrain(1)->setPosition(1200.0);
+    manager.getTrain(1)->setVelocity(25.0);
+
+    manager.addTrain(std::make_unique<train::ExpressTrain>(
+        2, 45000.0, 45.0, 0.9, 1.4));
+    manager.getTrain(2)->setPosition(500.0);
+    manager.getTrain(2)->setVelocity(25.0);
+
+    const auto route = navigation::RouteNavigator::findRoute(network, 1, 3);
+    ASSERT_TRUE(route.success);
+
+    SafetyPipeline pipeline(network, manager, {
+        { 1, 101, route },
+        { 2, 101, route }
+    });
+    const auto step = pipeline.makeStep();
+
+    WorldState state;
+    state.trains.push_back({1, TrainType::Express, 101,
+        45000.0, 45.0, 0.9, 1.4,
+        TrainState::Running, 1200.0, 25.0, 0.0});
+    state.trains.push_back({2, TrainType::Express, 101,
+        45000.0, 45.0, 0.9, 1.4,
+        TrainState::Running, 500.0, 25.0, 0.0});
+
+    const auto result = step(state);
+    for (const auto& cmd : result.commands)
+    {
+        if (cmd.trainId == 2)
+        {
+            EXPECT_NE(cmd.type, safety::SafetyCommandType::EmergencyBrake);
+            EXPECT_NE(cmd.type, safety::SafetyCommandType::HoldAtSignal);
+        }
+    }
+}
+
 } // namespace tcas::orchestrator

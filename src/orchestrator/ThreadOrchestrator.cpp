@@ -743,13 +743,22 @@ void ThreadOrchestrator::physicsLoop()
                 // BRAKING: approaching HoldAtSignal — transition to Stopped when velocity reaches 0
                 else if (train->state() == TrainState::Braking)
                 {
-                    const double effectiveSpeed = std::max(0.0, newVelocity);
-                    train->setVelocity(effectiveSpeed);
-                    if (train->velocity() <= 0.1)
+                    // If safety limit was cleared (e.g. signal cleared), immediately release brake and resume running
+                    if (!safetySpeedLimits_.contains(trainId) || safetySpeedLimits_[trainId] > 0.0)
                     {
-                        train->setVelocity(0.0);
-                        train->setAcceleration(0.0);
-                        train->setState(TrainState::Stopped);
+                        train->setState(TrainState::Running);
+                        train->setAcceleration(0.8);
+                    }
+                    else
+                    {
+                        const double effectiveSpeed = std::max(0.0, newVelocity);
+                        train->setVelocity(effectiveSpeed);
+                        if (train->velocity() <= 0.1)
+                        {
+                            train->setVelocity(0.0);
+                            train->setAcceleration(0.0);
+                            train->setState(TrainState::Stopped);
+                        }
                     }
                 }
                 // RUNNING: When there is no collision / safety intervention, accelerate and travel at max speed
@@ -928,10 +937,8 @@ void ThreadOrchestrator::safetyLoop()
 
                         if (!inConflict)
                         {
-                            // Only resume once the train has fully stopped (not while decelerating in Braking)
                             auto* t = trainManager_.getTrain(tid);
-                            if (t != nullptr &&
-                                t->state() != TrainState::Braking)
+                            if (t != nullptr)
                             {
                                 toResume.push_back(tid);
                             }

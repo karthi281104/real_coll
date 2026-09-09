@@ -455,34 +455,68 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
 
         // detected.firstConflictTime is already the relative TTC from prediction horizons
         const TimeSeconds ttc = std::max(0.0, detected.firstConflictTime);
-        const double relVel = std::abs(
-            ctxA->proxy->velocity() - ctxB->proxy->velocity());
 
         // Determine the yielding train (lower priority) with sticky priority support
+        // In rear-end conflicts, the lead train ahead ALWAYS has priority of way; trailing train yields.
         const std::uint64_t pairKey =
             (static_cast<std::uint64_t>(std::min(ctxA->proxy->id(), ctxB->proxy->id())) << 32) |
             static_cast<std::uint64_t>(std::max(ctxA->proxy->id(), ctxB->proxy->id()));
 
         bool aHasPriority = false;
-        auto stickyIt = stickyPriorities_.find(pairKey);
-        if (stickyIt != stickyPriorities_.end())
+        if (detected.type == conflict::ConflictType::RearEnd)
         {
-            aHasPriority = (stickyIt->second == ctxA->proxy->id());
+            if (ctxA->currentTrackId == ctxB->currentTrackId)
+            {
+                aHasPriority = (ctxA->proxy->position() >= ctxB->proxy->position());
+            }
+            else if (ctxA->route != nullptr)
+            {
+                const auto itA = std::find(ctxA->route->tracks.begin(), ctxA->route->tracks.end(), ctxA->currentTrackId);
+                const auto itB = std::find(ctxA->route->tracks.begin(), ctxA->route->tracks.end(), ctxB->currentTrackId);
+                if (itA != ctxA->route->tracks.end() && itB != ctxA->route->tracks.end())
+                {
+                    aHasPriority = (itA >= itB);
+                }
+            }
         }
         else
         {
-            const auto prioA = priorityEngine.assess(*ctxA->proxy);
-            const auto prioB = priorityEngine.assess(*ctxB->proxy);
-            aHasPriority =
-                prioA.higherThan(prioB) ||
-                (prioA.priority == prioB.priority &&
-                 (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
-                  (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
-                   ctxA->proxy->id() < ctxB->proxy->id())));
-            stickyPriorities_[pairKey] = aHasPriority ? ctxA->proxy->id() : ctxB->proxy->id();
+            auto stickyIt = stickyPriorities_.find(pairKey);
+            if (stickyIt != stickyPriorities_.end())
+            {
+                aHasPriority = (stickyIt->second == ctxA->proxy->id());
+            }
+            else
+            {
+                const auto prioA = priorityEngine.assess(*ctxA->proxy);
+                const auto prioB = priorityEngine.assess(*ctxB->proxy);
+                aHasPriority =
+                    prioA.higherThan(prioB) ||
+                    (prioA.priority == prioB.priority &&
+                     (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
+                      (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
+                       ctxA->proxy->id() < ctxB->proxy->id())));
+                stickyPriorities_[pairKey] = aHasPriority ? ctxA->proxy->id() : ctxB->proxy->id();
+            }
         }
 
+        const TrainContext* prioCtx  = aHasPriority ? ctxA : ctxB;
         const TrainContext* yieldCtx = aHasPriority ? ctxB : ctxA;
+
+        // Relative velocity: for rear-end, only closing speed matters (diverging = 0.0)
+        double relVel = 0.0;
+        if (detected.type == conflict::ConflictType::RearEnd)
+        {
+            relVel = std::max(0.0, yieldCtx->proxy->velocity() - prioCtx->proxy->velocity());
+        }
+        else if (detected.type == conflict::ConflictType::HeadOn)
+        {
+            relVel = yieldCtx->proxy->velocity() + prioCtx->proxy->velocity();
+        }
+        else
+        {
+            relVel = std::abs(ctxA->proxy->velocity() - ctxB->proxy->velocity());
+        }
 
         // Braking geometry
         const auto* yieldTrack = network_.getTrack(yieldCtx->currentTrackId);
@@ -507,7 +541,7 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
                 // BUG-5 fix: -1.0 sentinel means track not in route — skip
                 continue;
             }
-        if (availDist == 0.0)
+            if (availDist == 0.0)
             {
                 // Conflict node is exactly at current position — already passed
                 continue;
@@ -526,7 +560,46 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             else
             {
                 // Rear-End: yieldCtx is trailing, otherCtx is lead
-                availDist = std::max(15.0, otherCtx->proxy->position() - yieldCtx->proxy->position());
+                if (yieldCtx->currentTrackId == otherCtx->currentTrackId)
+                {
+                    availDist = std::max(15.0, otherCtx->proxy->position() - yieldCtx->proxy->position());
+                }
+                else if (yieldCtx->route != nullptr)
+                {
+                    const auto itY = std::find(yieldCtx->route->tracks.begin(), yieldCtx->route->tracks.end(), yieldCtx->currentTrackId);
+                    const auto itO = std::find(yieldCtx->route->tracks.begin(), yieldCtx->route->tracks.end(), otherCtx->currentTrackId);
+                    if (itY != yieldCtx->route->tracks.end() && itO != yieldCtx->route->tracks.end() && itY < itO)
+                    {
+                        const auto* yTrk = network_.getTrack(yieldCtx->currentTrackId);
+                        double routeDist = (yTrk != nullptr) ? std::max(0.0, yTrk->length() - yieldCtx->proxy->position()) : 0.0;
+                        for (auto it = itY + 1; it < itO; ++it)
+                        {
+                            const auto* midTrk = network_.getTrack(*it);
+                            if (midTrk != nullptr)
+                            {
+                                routeDist += midTrk->length();
+                            }
+                        }
+                        routeDist += otherCtx->proxy->position();
+                        availDist = std::max(15.0, routeDist);
+                    }
+                    else
+                    {
+                        const auto* yTrk = network_.getTrack(yieldCtx->currentTrackId);
+                        const double yRemaining = (yTrk != nullptr)
+                            ? std::max(0.0, yTrk->length() - yieldCtx->proxy->position())
+                            : 0.0;
+                        availDist = std::max(15.0, yRemaining + otherCtx->proxy->position());
+                    }
+                }
+                else
+                {
+                    const auto* yTrk = network_.getTrack(yieldCtx->currentTrackId);
+                    const double yRemaining = (yTrk != nullptr)
+                        ? std::max(0.0, yTrk->length() - yieldCtx->proxy->position())
+                        : 0.0;
+                    availDist = std::max(15.0, yRemaining + otherCtx->proxy->position());
+                }
             }
         }
         const double safetyMargin = availDist - brakingDist;
@@ -539,7 +612,6 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
         riskInput.conflictType              = detected.type;
         riskInput.trainMass                 = yieldCtx->proxy->mass();
         riskInput.sensorConfidence          = (yieldCtx->hasSensorFault || state.sensorFailure) ? 0.5 : 1.0;
-        riskInput.sensorConfidence          = yieldCtx->hasSensorFault ? 0.5 : 1.0;
         riskInput.communicationConfidence   = state.communicationFailure ? 0.4 : 1.0;
 
         const auto risk = riskEngine.assess(riskInput);
@@ -573,22 +645,41 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             static_cast<std::uint64_t>(std::max(ctxA->proxy->id(), ctxB->proxy->id()));
 
         bool aHasPriority = false;
-        auto stickyIt = stickyPriorities_.find(pairKey);
-        if (stickyIt != stickyPriorities_.end())
+        if (detected.type == conflict::ConflictType::RearEnd)
         {
-            aHasPriority = (stickyIt->second == ctxA->proxy->id());
+            if (ctxA->currentTrackId == ctxB->currentTrackId)
+            {
+                aHasPriority = (ctxA->proxy->position() >= ctxB->proxy->position());
+            }
+            else if (ctxA->route != nullptr)
+            {
+                const auto itA = std::find(ctxA->route->tracks.begin(), ctxA->route->tracks.end(), ctxA->currentTrackId);
+                const auto itB = std::find(ctxA->route->tracks.begin(), ctxA->route->tracks.end(), ctxB->currentTrackId);
+                if (itA != ctxA->route->tracks.end() && itB != ctxA->route->tracks.end())
+                {
+                    aHasPriority = (itA >= itB);
+                }
+            }
         }
         else
         {
-            const auto prioA = priorityEngine.assess(*ctxA->proxy);
-            const auto prioB = priorityEngine.assess(*ctxB->proxy);
-            aHasPriority =
-                prioA.higherThan(prioB) ||
-                (prioA.priority == prioB.priority &&
-                 (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
-                  (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
-                   ctxA->proxy->id() < ctxB->proxy->id())));
-            stickyPriorities_[pairKey] = aHasPriority ? ctxA->proxy->id() : ctxB->proxy->id();
+            auto stickyIt = stickyPriorities_.find(pairKey);
+            if (stickyIt != stickyPriorities_.end())
+            {
+                aHasPriority = (stickyIt->second == ctxA->proxy->id());
+            }
+            else
+            {
+                const auto prioA = priorityEngine.assess(*ctxA->proxy);
+                const auto prioB = priorityEngine.assess(*ctxB->proxy);
+                aHasPriority =
+                    prioA.higherThan(prioB) ||
+                    (prioA.priority == prioB.priority &&
+                     (ctxA->proxy->velocity() > ctxB->proxy->velocity() ||
+                      (ctxA->proxy->velocity() == ctxB->proxy->velocity() &&
+                       ctxA->proxy->id() < ctxB->proxy->id())));
+                stickyPriorities_[pairKey] = aHasPriority ? ctxA->proxy->id() : ctxB->proxy->id();
+            }
         }
 
         const TrainContext* prioCtx  = aHasPriority ? ctxA : ctxB;
@@ -681,14 +772,38 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             }
             else
             {
-                // LOGIC-5 fix: position subtraction is only meaningful if both
-                // trains are on the same track.  When they are on different
-                // tracks estimate the gap as (yield remaining on its track) +
-                // (lead position on its track).
                 if (yieldCtx->currentTrackId == otherCtx->currentTrackId)
                 {
                     availDist = std::max(15.0,
                         otherCtx->proxy->position() - yieldCtx->proxy->position());
+                }
+                else if (yieldCtx->route != nullptr)
+                {
+                    const auto itY = std::find(yieldCtx->route->tracks.begin(), yieldCtx->route->tracks.end(), yieldCtx->currentTrackId);
+                    const auto itO = std::find(yieldCtx->route->tracks.begin(), yieldCtx->route->tracks.end(), otherCtx->currentTrackId);
+                    if (itY != yieldCtx->route->tracks.end() && itO != yieldCtx->route->tracks.end() && itY < itO)
+                    {
+                        const auto* yTrk = network_.getTrack(yieldCtx->currentTrackId);
+                        double routeDist = (yTrk != nullptr) ? std::max(0.0, yTrk->length() - yieldCtx->proxy->position()) : 0.0;
+                        for (auto it = itY + 1; it < itO; ++it)
+                        {
+                            const auto* midTrk = network_.getTrack(*it);
+                            if (midTrk != nullptr)
+                            {
+                                routeDist += midTrk->length();
+                            }
+                        }
+                        routeDist += otherCtx->proxy->position();
+                        availDist = std::max(15.0, routeDist);
+                    }
+                    else
+                    {
+                        const auto* yTrk = network_.getTrack(yieldCtx->currentTrackId);
+                        const double yRemaining = (yTrk != nullptr)
+                            ? std::max(0.0, yTrk->length() - yieldCtx->proxy->position())
+                            : 0.0;
+                        availDist = std::max(15.0, yRemaining + otherCtx->proxy->position());
+                    }
                 }
                 else
                 {
@@ -735,16 +850,30 @@ SafetyCycleResult SafetyPipeline::run(const WorldState& state)
             command.type = safety::SafetyCommandType::HoldAtSignal;
             command.targetSpeed = 0.0;
         }
-        else if (detected.type == conflict::ConflictType::RearEnd &&
-                 command.type == safety::SafetyCommandType::ReduceSpeed)
+        else if (detected.type == conflict::ConflictType::RearEnd)
         {
-            // For rear-end closing conflicts, match the lead train's speed to cruise safely in convoy
+            // If the lead train is far ahead (> 400m) or headway is ample with safe braking margin
+            // and no rapid closing rate, do NOT issue an abrupt brake/hold command.
+            // Allow the train to cruise smoothly at line speed, regulated by convoy speed matching.
             const double leadSpeed = std::max(0.0, prioCtx->proxy->velocity());
-            command.targetSpeed = std::min(command.targetSpeed, leadSpeed);
-            if (command.targetSpeed < 3.0)
+            const double closingSpeed = std::max(0.0, yieldCtx->proxy->velocity() - leadSpeed);
+            if (availDist > 400.0 || (availDist > 150.0 && availDist > 2.5 * brakingDist && closingSpeed <= 2.0))
             {
-                command.type = safety::SafetyCommandType::HoldAtSignal;
-                command.targetSpeed = 0.0;
+                command.type = safety::SafetyCommandType::NoAction;
+                command.targetSpeed = yieldCtx->proxy->maximumSpeed();
+            }
+            else if (command.type == safety::SafetyCommandType::ReduceSpeed)
+            {
+                command.targetSpeed = std::min(command.targetSpeed, leadSpeed);
+                if (availDist < 75.0)
+                {
+                    command.type = safety::SafetyCommandType::HoldAtSignal;
+                    command.targetSpeed = 0.0;
+                }
+                else
+                {
+                    command.targetSpeed = std::max(command.targetSpeed, 5.0);
+                }
             }
         }
         // Deduplicate commands: keep the single most restrictive command per train

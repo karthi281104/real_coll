@@ -590,8 +590,8 @@ TEST(ThreadOrchestratorTest, CompletedTrainIsRemovedAfterDwellPeriod)
     manager.addTrain(std::make_unique<train::ExpressTrain>(
         1, 45000.0, 45.0, 0.9, 1.4));
     auto* t = manager.getTrain(1);
-    t->setPosition(99.0);
-    t->setVelocity(30.0);
+    t->setPosition(98.0);
+    t->setVelocity(20.0);
     t->setState(TrainState::Running);
 
     navigation::RouteResult route;

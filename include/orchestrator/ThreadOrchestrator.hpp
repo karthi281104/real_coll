@@ -105,6 +105,11 @@ public:
     void setCompletedTrainDwellSeconds(TimeSeconds seconds) noexcept { config_.completedTrainDwellSeconds = seconds; }
     [[nodiscard]] TimeSeconds completedTrainDwellSeconds() const noexcept { return config_.completedTrainDwellSeconds; }
 
+    [[nodiscard]] std::vector<ConflictLifecycleRecord> conflictHistory() const;
+    [[nodiscard]] std::vector<ReservationLifecycleRecord> reservationHistory() const;
+    [[nodiscard]] std::vector<CommandLifecycleRecord> commandHistory() const;
+    void clearHistory();
+
 private:
     void physicsLoop();
     void safetyLoop();
@@ -146,6 +151,16 @@ private:
     /// Previous-cycle degradation state for hysteresis (LOGIC-7 fix).
     bool commDegradedPrev_{ false };
     std::atomic<bool> safetyFailure_{ false };
+
+    std::vector<ConflictLifecycleRecord> conflictHistory_;
+    std::vector<ReservationLifecycleRecord> reservationHistory_;
+    std::vector<CommandLifecycleRecord> commandHistory_;
+    std::unordered_map<std::uint64_t, std::size_t> activeConflictRecordMap_;
+    std::unordered_map<std::uint64_t, std::size_t> activeReservationRecordMap_;
+    std::unordered_map<TrainId, safety::SafetyCommand> lastRecordedCommand_;
+    std::size_t conflictCounter_{ 0 };
+    std::size_t reservationCounter_{ 0 };
+    std::size_t commandCounter_{ 0 };
 
     mutable std::mutex safetyStepMutex_;
     SafetyStep safetyStep_;

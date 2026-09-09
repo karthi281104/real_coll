@@ -66,6 +66,7 @@ private:
     void showActiveConflicts();
     void showReservations();
     void showDecisions();
+    void showSafetyLifecycleNarrative();
 
     // Fault injection
     void toggleSensorFaultInteractive();

@@ -871,6 +871,206 @@ void ThreadOrchestrator::safetyLoop()
                     {
                         trainsHeldBySafety_.insert(command.trainId);
                     }
+
+                    // Record distinct command changes in session history
+                    auto lastCmdIt = lastRecordedCommand_.find(command.trainId);
+                    if (lastCmdIt == lastRecordedCommand_.end() ||
+                        lastCmdIt->second.type != command.type ||
+                        std::abs(lastCmdIt->second.targetSpeed - command.targetSpeed) > 0.5)
+                    {
+                        CommandLifecycleRecord cmdRec;
+                        cmdRec.id = ++commandCounter_;
+                        cmdRec.timestamp = worldState_.simulationTime;
+                        cmdRec.trainId = command.trainId;
+                        cmdRec.type = command.type;
+                        cmdRec.targetSpeed = command.targetSpeed;
+                        cmdRec.riskScore = command.riskScore;
+
+                        switch (command.type)
+                        {
+                        case safety::SafetyCommandType::HoldAtSignal:
+                            cmdRec.triggerReason = "Junction or track conflict approach: exclusive lock required";
+                            cmdRec.outcome = "Service braking engaged -> Target 0.0 m/s (Hold at signal)";
+                            break;
+                        case safety::SafetyCommandType::ReduceSpeed:
+                            cmdRec.triggerReason = "Convoy headway regulation / conflict approach caution";
+                            cmdRec.outcome = "Service braking engaged -> Regulating target speed to " +
+                                             std::to_string(static_cast<int>(command.targetSpeed)) + " m/s";
+                            break;
+                        case safety::SafetyCommandType::EmergencyBrake:
+                            cmdRec.triggerReason = "Critical risk or physical braking distance infeasible";
+                            cmdRec.outcome = "EMERGENCY BRAKE ENGAGED -> Maximum deceleration to 0.0 m/s";
+                            break;
+                        default:
+                            break;
+                        }
+                        commandHistory_.push_back(cmdRec);
+                        lastRecordedCommand_[command.trainId] = command;
+                    }
+                }
+
+                // Update conflict lifecycle history
+                const double simTime = worldState_.simulationTime;
+                std::unordered_set<std::uint64_t> currentActiveKeys;
+
+                for (const auto& c : result.activeConflicts)
+                {
+                    const std::uint64_t cKey =
+                        (static_cast<std::uint64_t>(std::min(c.trainA, c.trainB)) << 32) |
+                        static_cast<std::uint64_t>(std::max(c.trainA, c.trainB)) ^
+                        (static_cast<std::uint64_t>(c.type) << 24) ^
+                        (static_cast<std::uint64_t>(c.resourceNodeId) << 8);
+
+                    currentActiveKeys.insert(cKey);
+
+                    auto mapIt = activeConflictRecordMap_.find(cKey);
+                    if (mapIt == activeConflictRecordMap_.end())
+                    {
+                        ConflictLifecycleRecord rec;
+                        rec.id = ++conflictCounter_;
+                        rec.detectedTime = simTime;
+                        rec.trainA = c.trainA;
+                        rec.trainB = c.trainB;
+                        rec.type = c.type;
+                        rec.trackId = c.trackId;
+                        rec.resourceNodeId = c.resourceNodeId;
+                        rec.initialTtc = c.firstConflictTime;
+                        rec.initialSeparation = c.minimumSeparation;
+
+                        for (const auto& d : result.decisions)
+                        {
+                            if ((d.priorityTrain == c.trainA && d.yieldingTrain == c.trainB) ||
+                                (d.priorityTrain == c.trainB && d.yieldingTrain == c.trainA))
+                            {
+                                rec.priorityTrain = d.priorityTrain;
+                                rec.yieldingTrain = d.yieldingTrain;
+                                rec.riskScore = d.riskScore;
+                                rec.commandType = d.commandType;
+                                break;
+                            }
+                        }
+
+                        for (const auto& cmd : result.commands)
+                        {
+                            if (cmd.trainId == rec.yieldingTrain)
+                            {
+                                rec.targetSpeed = cmd.targetSpeed;
+                                break;
+                            }
+                        }
+
+                        if (c.resourceNodeId != 0)
+                        {
+                            rec.reservationMade = true;
+                            rec.reservedNodeId = c.resourceNodeId;
+                        }
+
+                        conflictHistory_.push_back(rec);
+                        activeConflictRecordMap_[cKey] = conflictHistory_.size() - 1;
+                    }
+                    else
+                    {
+                        auto& existingRec = conflictHistory_[mapIt->second];
+                        if (existingRec.priorityTrain == 0)
+                        {
+                            for (const auto& d : result.decisions)
+                            {
+                                if ((d.priorityTrain == c.trainA && d.yieldingTrain == c.trainB) ||
+                                    (d.priorityTrain == c.trainB && d.yieldingTrain == c.trainA))
+                                {
+                                    existingRec.priorityTrain = d.priorityTrain;
+                                    existingRec.yieldingTrain = d.yieldingTrain;
+                                    existingRec.riskScore = d.riskScore;
+                                    existingRec.commandType = d.commandType;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check for resolved conflicts
+                std::vector<std::uint64_t> toRemoveActiveKeys;
+                for (const auto& [cKey, recIdx] : activeConflictRecordMap_)
+                {
+                    if (!currentActiveKeys.contains(cKey))
+                    {
+                        toRemoveActiveKeys.push_back(cKey);
+                        if (recIdx < conflictHistory_.size())
+                        {
+                            auto& rec = conflictHistory_[recIdx];
+                            rec.isResolved = true;
+                            rec.resolvedTime = simTime;
+                            if (rec.type == conflict::ConflictType::RearEnd)
+                            {
+                                rec.resolutionOutcome =
+                                    "Safe separation achieved (headway restored). Trailing train speed regulated to convoy / line speed.";
+                            }
+                            else if (rec.type == conflict::ConflictType::Junction)
+                            {
+                                rec.resolutionOutcome =
+                                    "Priority train cleared junction node #" + std::to_string(rec.resourceNodeId) +
+                                    ". Interlocking reservation released; yielding train permitted to proceed.";
+                            }
+                            else if (rec.type == conflict::ConflictType::Platform)
+                            {
+                                rec.resolutionOutcome =
+                                    "Platform node #" + std::to_string(rec.resourceNodeId) +
+                                    " vacated. Docking clearance granted to approaching train.";
+                            }
+                            else
+                            {
+                                rec.resolutionOutcome =
+                                    "Opposing movements stabilized. Stopping distance margin satisfied.";
+                            }
+                        }
+                    }
+                }
+                for (const auto k : toRemoveActiveKeys)
+                {
+                    activeConflictRecordMap_.erase(k);
+                }
+
+                // Update reservation lifecycle history
+                std::unordered_set<std::uint64_t> currentResKeys;
+                for (const auto& r : result.reservations)
+                {
+                    const std::uint64_t rKey =
+                        (static_cast<std::uint64_t>(r.trainId) << 32) |
+                        static_cast<std::uint64_t>(r.zone.nodeId);
+                    currentResKeys.insert(rKey);
+
+                    auto mapIt = activeReservationRecordMap_.find(rKey);
+                    if (mapIt == activeReservationRecordMap_.end())
+                    {
+                        ReservationLifecycleRecord resRec;
+                        resRec.id = ++reservationCounter_;
+                        resRec.trainId = r.trainId;
+                        resRec.nodeId = r.zone.nodeId;
+                        resRec.zoneType = r.zone.type;
+                        resRec.requestedTime = simTime;
+                        resRec.startTime = r.startTime;
+                        resRec.endTime = r.endTime;
+                        reservationHistory_.push_back(resRec);
+                        activeReservationRecordMap_[rKey] = reservationHistory_.size() - 1;
+                    }
+                }
+                std::vector<std::uint64_t> toRemoveResKeys;
+                for (const auto& [rKey, resIdx] : activeReservationRecordMap_)
+                {
+                    if (!currentResKeys.contains(rKey))
+                    {
+                        toRemoveResKeys.push_back(rKey);
+                        if (resIdx < reservationHistory_.size())
+                        {
+                            reservationHistory_[resIdx].isReleased = true;
+                            reservationHistory_[resIdx].releasedTime = simTime;
+                        }
+                    }
+                }
+                for (const auto k : toRemoveResKeys)
+                {
+                    activeReservationRecordMap_.erase(k);
                 }
 
                 // Auto-Resume: If a train was held/slowing but no longer
@@ -972,6 +1172,21 @@ void ThreadOrchestrator::safetyLoop()
                     {
                         train->setVelocity(1.0);
                     }
+
+                    // Record auto-resume in command history
+                    CommandLifecycleRecord resumeCmd;
+                    resumeCmd.id = ++commandCounter_;
+                    resumeCmd.timestamp = worldState_.simulationTime;
+                    resumeCmd.trainId = tid;
+                    resumeCmd.type = safety::SafetyCommandType::NoAction;
+                    resumeCmd.targetSpeed = train->maximumSpeed();
+                    resumeCmd.riskScore = 0.0;
+                    resumeCmd.triggerReason = "Conflict resolved / clearance granted";
+                    resumeCmd.outcome = "AUTO-RESUME: Released safety hold -> Accelerating to line speed (" +
+                                        std::to_string(static_cast<int>(train->maximumSpeed())) + " m/s)";
+                    commandHistory_.push_back(resumeCmd);
+                    lastRecordedCommand_.erase(tid);
+
                     worldState_.operatorMessage = "[AUTO-RESUME] Conflict cleared for Train #" +
                         std::to_string(tid) + " -> Signal cleared, re-accelerating to line speed.";
                 }
@@ -1051,6 +1266,38 @@ void ThreadOrchestrator::hmiLoop()
         ++hmiCycles_;
         waitUntil(next);
     }
+}
+
+std::vector<ConflictLifecycleRecord> ThreadOrchestrator::conflictHistory() const
+{
+    std::shared_lock lock(worldMutex_);
+    return conflictHistory_;
+}
+
+std::vector<ReservationLifecycleRecord> ThreadOrchestrator::reservationHistory() const
+{
+    std::shared_lock lock(worldMutex_);
+    return reservationHistory_;
+}
+
+std::vector<CommandLifecycleRecord> ThreadOrchestrator::commandHistory() const
+{
+    std::shared_lock lock(worldMutex_);
+    return commandHistory_;
+}
+
+void ThreadOrchestrator::clearHistory()
+{
+    std::unique_lock lock(worldMutex_);
+    conflictHistory_.clear();
+    reservationHistory_.clear();
+    commandHistory_.clear();
+    activeConflictRecordMap_.clear();
+    activeReservationRecordMap_.clear();
+    lastRecordedCommand_.clear();
+    conflictCounter_ = 0;
+    reservationCounter_ = 0;
+    commandCounter_ = 0;
 }
 
 } // namespace tcas::orchestrator

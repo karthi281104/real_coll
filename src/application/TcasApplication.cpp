@@ -765,9 +765,10 @@ void TcasApplication::printSafetyMenu() const
     printSeparator();
     std::cout << " [3] SAFETY, CONFLICTS & INTERLOCKING CENTER\n";
     printSeparator();
-    std::cout << "  [1] View Active Conflicts & Time-To-Collision (TTC)\n"
-              << "  [2] View Junction & Platform Reservations\n"
-              << "  [3] View Safety Arbitration Decisions & Risk Scores\n"
+    std::cout << "  [1] Conflict Prediction & Resolution History (Active & Full Session History)\n"
+              << "  [2] Interlocking & Resource Reservation History (Active & Past Zone Locks)\n"
+              << "  [3] Safety Command & Arbitration Audit Log (All Decisions & Resulting Outcomes)\n"
+              << "  [4] Full Session Safety Narrative (End-to-End Prediction -> Action -> Resolution)\n"
               << "  [0] <-- Back to Main Menu\n\n";
 }
 
@@ -776,37 +777,81 @@ void TcasApplication::handleSafetyMenuInput(const std::string& input)
     if (input == "1") { showActiveConflicts(); }
     else if (input == "2") { showReservations(); }
     else if (input == "3") { showDecisions(); }
+    else if (input == "4") { showSafetyLifecycleNarrative(); }
     else if (input == "0" || input == "b" || input == "back")
     {
         currentMenu_ = MenuState::MainMenu;
     }
     else if (!input.empty())
     {
-        std::cout << "[ERR] Invalid choice. Enter 1-3 or 0.\n";
+        std::cout << "[ERR] Invalid choice. Enter 1-4 or 0.\n";
     }
 }
 
 void TcasApplication::showActiveConflicts()
 {
     printSeparator();
-    std::cout << " ACTIVE CONFLICTS (TCAS Predictive Detection)\n";
+    std::cout << " CONFLICT PREDICTION & RESOLUTION HISTORY (Current Session)\n";
     printSeparator();
     if (!orchestrator_) return;
+
     const auto snap = orchestrator_->snapshot();
+    const auto history = orchestrator_->conflictHistory();
+
+    std::cout << " >> CURRENTLY ACTIVE CONFLICTS (" << snap.activeConflicts.size() << "):\n";
     if (snap.activeConflicts.empty())
     {
-        std::cout << " [ALL CLEAR] No spatial/temporal conflicts detected across predicted horizons.\n";
+        std::cout << "    [ALL CLEAR] No active conflicts across prediction horizons.\n";
     }
     else
     {
         for (const auto& c : snap.activeConflicts)
         {
-            std::cout << "  [CONFLICT] Type: " << conflictTypeName(c.type)
+            std::cout << "    * [ACTIVE] " << conflictTypeName(c.type)
                       << " | Trains: #" << c.trainA << " <-> #" << c.trainB
-                      << " | Resource Node: " << c.resourceNodeId
-                      << "\n             Time to Collision (TTC): " << std::fixed << std::setprecision(2)
-                      << c.firstConflictTime << " s"
-                      << " | Min Separation: " << c.minimumSeparation << " m\n";
+                      << " | Track: " << c.trackId
+                      << (c.resourceNodeId != 0 ? (" | Node: " + std::to_string(c.resourceNodeId)) : "")
+                      << "\n      Time to Collision (TTC): " << std::fixed << std::setprecision(2)
+                      << c.firstConflictTime << " s | Min Separation: " << c.minimumSeparation << " m\n";
+        }
+    }
+
+    std::cout << "\n >> SESSION CONFLICT LIFECYCLE AUDIT (Total: " << history.size() << "):\n";
+    if (history.empty())
+    {
+        std::cout << "    No conflicts have occurred in this session so far.\n";
+    }
+    else
+    {
+        for (const auto& h : history)
+        {
+            std::cout << "  --------------------------------------------------------------------\n"
+                      << "  Conflict #" << h.id << ": " << conflictTypeName(h.type)
+                      << " | Trains: #" << h.trainA << " <-> #" << h.trainB
+                      << " | Track " << h.trackId
+                      << (h.resourceNodeId != 0 ? (" | Node #" + std::to_string(h.resourceNodeId)) : "") << "\n"
+                      << "  Detected At : t = " << std::fixed << std::setprecision(1) << h.detectedTime << " s"
+                      << " | Initial TTC: " << std::setprecision(2) << h.initialTtc << " s"
+                      << " | Initial Sep: " << h.initialSeparation << " m\n"
+                      << "  Arbitration : Priority -> Train #" << h.priorityTrain
+                      << " | Yielding -> Train #" << h.yieldingTrain
+                      << " (Risk Score: " << h.riskScore << ")\n"
+                      << "  System Action: Command -> " << commandName(h.commandType)
+                      << " (Target: " << std::setprecision(1) << h.targetSpeed << " m/s)";
+            if (h.reservationMade)
+            {
+                std::cout << " | Interlocking: Exclusive Lock Node #" << h.reservedNodeId;
+            }
+            std::cout << "\n  Status       : ";
+            if (h.isResolved)
+            {
+                std::cout << "[RESOLVED at t = " << h.resolvedTime << " s]\n"
+                          << "  Resolution   : " << h.resolutionOutcome << "\n";
+            }
+            else
+            {
+                std::cout << "[ACTIVE / RESOLVING] System actively enforcing safety separation.\n";
+            }
         }
     }
     printSeparator();
@@ -816,22 +861,44 @@ void TcasApplication::showActiveConflicts()
 void TcasApplication::showReservations()
 {
     printSeparator();
-    std::cout << " INTERLOCKING & DYNAMIC RESERVATIONS\n";
+    std::cout << " INTERLOCKING & RESOURCE RESERVATION HISTORY (Current Session)\n";
     printSeparator();
     if (!orchestrator_) return;
+
     const auto snap = orchestrator_->snapshot();
+    const auto history = orchestrator_->reservationHistory();
+
+    std::cout << " >> CURRENTLY ACTIVE EXCLUSIVE RESERVATIONS (" << snap.reservations.size() << "):\n";
     if (snap.reservations.empty())
     {
-        std::cout << " No exclusive junction/platform reservations currently granted.\n";
+        std::cout << "    No exclusive junction/platform reservations currently active.\n";
     }
     else
     {
         for (const auto& r : snap.reservations)
         {
-            std::cout << "  Zone: Node " << r.zone.nodeId
+            std::cout << "    * [LOCKED] Zone: Node " << r.zone.nodeId
                       << " | Reserved For: Train #" << r.trainId
                       << " | Window: [" << std::fixed << std::setprecision(1)
                       << r.startTime << "s - " << r.endTime << "s]\n";
+        }
+    }
+
+    std::cout << "\n >> SESSION RESERVATION AUDIT LOG (Total: " << history.size() << "):\n";
+    if (history.empty())
+    {
+        std::cout << "    No junction or platform reservations recorded in this session.\n";
+    }
+    else
+    {
+        for (const auto& r : history)
+        {
+            std::cout << "  * Res #" << r.id << " | Node #" << r.nodeId
+                      << " | Granted to Train #" << r.trainId
+                      << " | Window: [" << std::fixed << std::setprecision(1)
+                      << r.startTime << "s - " << r.endTime << "s] | Requested: t=" << r.requestedTime << "s"
+                      << " | Status: " << (r.isReleased ? ("[RELEASED at t=" + std::to_string(static_cast<int>(r.releasedTime)) + "s]") : "[ACTIVE]")
+                      << "\n";
         }
     }
     printSeparator();
@@ -841,23 +908,100 @@ void TcasApplication::showReservations()
 void TcasApplication::showDecisions()
 {
     printSeparator();
-    std::cout << " SAFETY ARBITRATION DECISIONS (Priority Hierarchy)\n";
+    std::cout << " SAFETY ARBITRATION & COMMAND AUDIT LOG (Current Session)\n";
     printSeparator();
     if (!orchestrator_) return;
+
     const auto snap = orchestrator_->snapshot();
+    const auto history = orchestrator_->commandHistory();
+
+    std::cout << " >> CURRENT CYCLE DECISIONS (" << snap.decisions.size() << "):\n";
     if (snap.decisions.empty())
     {
-        std::cout << " No active arbitration decisions required.\n";
+        std::cout << "    No active arbitration decisions in current cycle.\n";
     }
     else
     {
         for (const auto& d : snap.decisions)
         {
-            std::cout << "  Priority Train: #" << d.priorityTrain
+            std::cout << "    * Priority Train: #" << d.priorityTrain
                       << " (granted passage)\n"
-                      << "  Yielding Train: #" << d.yieldingTrain
+                      << "      Yielding Train: #" << d.yieldingTrain
                       << " -> Command: " << commandName(d.commandType)
                       << " | Risk Score: " << std::fixed << std::setprecision(2) << d.riskScore << "\n";
+        }
+    }
+
+    std::cout << "\n >> SESSION SAFETY COMMAND AUDIT LOG (Total: " << history.size() << "):\n";
+    if (history.empty())
+    {
+        std::cout << "    No safety intervention commands recorded in this session.\n";
+    }
+    else
+    {
+        for (const auto& c : history)
+        {
+            std::cout << "  * Cmd #" << c.id << " [t = " << std::fixed << std::setprecision(1) << c.timestamp << " s] "
+                      << "Train #" << c.trainId << " -> " << commandName(c.type)
+                      << " (Target: " << c.targetSpeed << " m/s, Risk: " << std::setprecision(1) << c.riskScore << ")\n"
+                      << "    Trigger: " << c.triggerReason << "\n"
+                      << "    Outcome: " << c.outcome << "\n";
+        }
+    }
+    printSeparator();
+    waitForEnter();
+}
+
+void TcasApplication::showSafetyLifecycleNarrative()
+{
+    printSeparator();
+    std::cout << " COMPREHENSIVE SESSION SAFETY NARRATIVE (End-to-End)\n";
+    std::cout << " Conflict Prediction -> Arbitration -> Interlocking & Commands -> Resolution\n";
+    printSeparator();
+    if (!orchestrator_) return;
+
+    const auto conflicts = orchestrator_->conflictHistory();
+    const auto reservations = orchestrator_->reservationHistory();
+    const auto commands = orchestrator_->commandHistory();
+
+    if (conflicts.empty() && reservations.empty() && commands.empty())
+    {
+        std::cout << " [ALL CLEAR] No safety events or conflicts have occurred in this session.\n"
+                  << " All trains operated under nominal line conditions.\n";
+    }
+    else
+    {
+        std::cout << " SESSION SUMMARY:\n"
+                  << "  * Total Conflicts Detected    : " << conflicts.size() << "\n"
+                  << "  * Interlocking Reservations   : " << reservations.size() << "\n"
+                  << "  * Safety Commands Issued      : " << commands.size() << "\n\n";
+
+        std::cout << " CHRONOLOGICAL SAFETY EVENT LIFECYCLES:\n";
+        for (const auto& h : conflicts)
+        {
+            std::cout << " ====================================================================\n"
+                      << " [EVENT #" << h.id << "] " << conflictTypeName(h.type) << " Conflict\n"
+                      << "  1. INCIDENT PREDICTION:\n"
+                      << "     - Trains Involved: Train #" << h.trainA << " and Train #" << h.trainB << "\n"
+                      << "     - Location       : Track " << h.trackId
+                      << (h.resourceNodeId != 0 ? (" approaching Node #" + std::to_string(h.resourceNodeId)) : "") << "\n"
+                      << "     - Time Detected  : t = " << std::fixed << std::setprecision(1) << h.detectedTime << " s\n"
+                      << "     - Initial TTC    : " << std::setprecision(2) << h.initialTtc << " s (Min Separation: " << h.initialSeparation << " m)\n\n"
+                      << "  2. SYSTEM ARBITRATION & INTERLOCKING DECISION:\n"
+                      << "     - Right-of-Way   : Granted to Priority Train #" << h.priorityTrain << "\n"
+                      << "     - Yielding Train : Train #" << h.yieldingTrain << " (Risk Assessment: " << h.riskScore << ")\n";
+            if (h.reservationMade)
+            {
+                std::cout << "     - Interlocking   : Exclusive passage reservation granted on Node #" << h.reservedNodeId
+                          << " for Train #" << h.priorityTrain << "\n";
+            }
+            std::cout << "\n  3. SAFETY COMMAND & KINEMATIC INTERVENTION:\n"
+                      << "     - Issued Command : " << commandName(h.commandType)
+                      << " (Regulated Target Speed: " << std::setprecision(1) << h.targetSpeed << " m/s)\n"
+                      << "     - Action Result  : Train #" << h.yieldingTrain << " applied service brakes to establish safe headway.\n\n"
+                      << "  4. CONFLICT RESOLUTION & OUTCOME:\n"
+                      << "     - Final State    : " << (h.isResolved ? ("[RESOLVED at t = " + std::to_string(static_cast<int>(h.resolvedTime)) + " s]") : "[ACTIVE / UNDER MANAGEMENT]") << "\n"
+                      << "     - Resolution Log : " << (h.isResolved ? h.resolutionOutcome : "Separation actively being regulated.") << "\n";
         }
     }
     printSeparator();

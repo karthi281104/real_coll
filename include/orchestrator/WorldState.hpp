@@ -30,6 +30,57 @@ struct SafetyDecision
         safety::SafetyCommandType::NoAction };
 };
 
+struct ConflictLifecycleRecord
+{
+    std::size_t id{ 0 };
+    TimeSeconds detectedTime{ 0.0 };
+    TimeSeconds resolvedTime{ 0.0 };
+    bool isResolved{ false };
+
+    TrainId trainA{ 0 };
+    TrainId trainB{ 0 };
+    conflict::ConflictType type{ conflict::ConflictType::RearEnd };
+    TrackId trackId{ 0 };
+    infrastructure::NodeId resourceNodeId{ 0 };
+    TimeSeconds initialTtc{ 0.0 };
+    DistanceMeters initialSeparation{ 0.0 };
+
+    TrainId priorityTrain{ 0 };
+    TrainId yieldingTrain{ 0 };
+    double riskScore{ 0.0 };
+    safety::SafetyCommandType commandType{ safety::SafetyCommandType::NoAction };
+    double targetSpeed{ 0.0 };
+    bool reservationMade{ false };
+    infrastructure::NodeId reservedNodeId{ 0 };
+
+    std::string resolutionOutcome;
+};
+
+struct ReservationLifecycleRecord
+{
+    std::size_t id{ 0 };
+    TrainId trainId{ 0 };
+    infrastructure::NodeId nodeId{ 0 };
+    conflict::ConflictZoneType zoneType{ conflict::ConflictZoneType::Junction };
+    TimeSeconds requestedTime{ 0.0 };
+    TimeSeconds startTime{ 0.0 };
+    TimeSeconds endTime{ 0.0 };
+    TimeSeconds releasedTime{ 0.0 };
+    bool isReleased{ false };
+};
+
+struct CommandLifecycleRecord
+{
+    std::size_t id{ 0 };
+    TimeSeconds timestamp{ 0.0 };
+    TrainId trainId{ 0 };
+    safety::SafetyCommandType type{ safety::SafetyCommandType::NoAction };
+    double targetSpeed{ 0.0 };
+    double riskScore{ 0.0 };
+    std::string triggerReason;
+    std::string outcome;
+};
+
 struct TrainSnapshot
 {
     TrainId id{ 0 };

@@ -589,17 +589,20 @@ void TcasApplication::dispatchCustomInteractive()
     }
 
     // Step 4: Initial Speed validation loop
-    double spd = 20.0;
+    const double defaultSpd = (tType == TrainType::Freight) ? 20.0 : 33.3;
+    const double maxAllowed = (tType == TrainType::Express) ? 45.0 :
+                              ((tType == TrainType::Freight) ? 22.2 : 33.3);
+    double spd = defaultSpd;
     while (true)
     {
-        std::cout << "Enter Initial Speed in m/s (1.0..45.0, 0=Cancel) [20.0] > ";
+        std::cout << "Enter Initial Speed in m/s (1.0.." << maxAllowed << ", 0=Cancel) [" << defaultSpd << "] > ";
         std::string line;
         if (!std::getline(std::cin, line)) { return; }
         line.erase(0, line.find_first_not_of(" \t\r\n"));
         line.erase(line.find_last_not_of(" \t\r\n") + 1);
         if (line.empty())
         {
-            spd = 20.0;
+            spd = defaultSpd;
             break;
         }
         try
@@ -608,7 +611,7 @@ void TcasApplication::dispatchCustomInteractive()
             spd = std::stod(line, &idx);
             if (idx != line.size())
             {
-                std::cout << "  [ERROR] Invalid characters in speed. Please enter a numeric value (e.g. 20.0).\n";
+                std::cout << "  [ERROR] Invalid characters in speed. Please enter a numeric value (e.g. " << defaultSpd << ").\n";
                 continue;
             }
             if (spd == 0.0)
@@ -617,9 +620,10 @@ void TcasApplication::dispatchCustomInteractive()
                 waitForEnter();
                 return;
             }
-            if (spd < 1.0 || spd > 45.0)
+            if (spd < 1.0 || spd > maxAllowed)
             {
-                std::cout << "  [ERROR] Speed " << spd << " m/s is out of range. Must be between 1.0 and 45.0 m/s. Please try again.\n";
+                std::cout << "  [ERROR] Speed " << spd << " m/s is out of range. Must be between 1.0 and "
+                          << maxAllowed << " m/s. Please try again.\n";
                 continue;
             }
             break;

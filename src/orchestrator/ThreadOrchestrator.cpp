@@ -659,6 +659,10 @@ void ThreadOrchestrator::physicsLoop()
                 // Terminal states: hold at zero
                 train->setVelocity(0.0);
                 train->setAcceleration(0.0);
+                if (train->state() == TrainState::Completed && !arrivalTimes_.contains(trainId))
+                {
+                    arrivalTimes_[trainId] = worldState_.simulationTime;
+                }
             }
             else if (train->state() == TrainState::Stopped ||
                      (safetySpeedLimits_.contains(trainId) && safetySpeedLimits_[trainId] <= 0.0 &&
@@ -767,6 +771,38 @@ void ThreadOrchestrator::physicsLoop()
                     const double effectiveSpeed = std::min(newVelocity, targetMaxSpeed);
                     train->setVelocity(effectiveSpeed);
                 }
+            }
+        }
+
+        // Automatically remove completed trains after dwell period at destination
+        if (config_.completedTrainDwellSeconds > 0.0)
+        {
+            std::vector<TrainId> completedToRemove;
+            for (const auto& [tid, arrivalTime] : arrivalTimes_)
+            {
+                if (worldState_.simulationTime - arrivalTime >= config_.completedTrainDwellSeconds)
+                {
+                    completedToRemove.push_back(tid);
+                }
+            }
+            for (const auto tid : completedToRemove)
+            {
+                arrivalTimes_.erase(tid);
+                const auto it = std::find(trainIds_.begin(), trainIds_.end(), tid);
+                if (it != trainIds_.end())
+                {
+                    trainIds_.erase(it);
+                }
+                navStates_.erase(tid);
+                failedSensors_.erase(tid);
+                operatorSpeedLimits_.erase(tid);
+                safetySpeedLimits_.erase(tid);
+                dispatchSpeeds_.erase(tid);
+                trainsHeldBySafety_.erase(tid);
+                emergencyBrakeSet_.erase(tid);
+                trainManager_.removeTrain(tid);
+                worldState_.operatorMessage = "[COMPLETED] Train #" + std::to_string(tid) +
+                    " reached destination and was cleared from active service.";
             }
         }
 

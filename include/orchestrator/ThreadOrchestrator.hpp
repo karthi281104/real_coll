@@ -34,6 +34,7 @@ struct OrchestratorConfig
     std::chrono::milliseconds hmiPeriod{ 200 };
     bool printHmi{ false };
     std::string telemetryDirectory{ "logs" };
+    TimeSeconds completedTrainDwellSeconds{ 5.0 };
 };
 
 struct SafetyCycleResult
@@ -101,6 +102,8 @@ public:
     void setTrainRoute(TrainId trainId, TrackId startTrackId, navigation::RouteResult route);
 
     void setOperatorMessage(std::string message);
+    void setCompletedTrainDwellSeconds(TimeSeconds seconds) noexcept { config_.completedTrainDwellSeconds = seconds; }
+    [[nodiscard]] TimeSeconds completedTrainDwellSeconds() const noexcept { return config_.completedTrainDwellSeconds; }
 
 private:
     void physicsLoop();
@@ -137,6 +140,7 @@ private:
     /// Trains in EmergencyBrake state require explicit operator reset before
     /// they may move again — they are NOT auto-resumed by the safety loop.
     std::unordered_set<TrainId> emergencyBrakeSet_;
+    std::unordered_map<TrainId, TimeSeconds> arrivalTimes_;
     std::atomic<bool> userCommFault_{ false };
     std::atomic<bool> commChannelDegraded_{ false };
     /// Previous-cycle degradation state for hysteresis (LOGIC-7 fix).
